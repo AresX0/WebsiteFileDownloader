@@ -169,11 +169,103 @@ class DownloaderGUI:
             self.log_dir = self.config["log_dir"]
         else:
             self.log_dir = os.path.join(os.getcwd(), "logs")
+        if self.config.get("credentials_path"):
+            self.credentials_path = self.config["credentials_path"]
+        else:
+            self.credentials_path = None
         os.makedirs(self.log_dir, exist_ok=True)
         self.setup_logger(self.log_dir)
         self.logger.debug(f"EpsteinFilesDownloader v{__version__} started. Log file: {self.log_file}")
         self.create_menu()
         self.create_widgets()
+        # --- Drag and Drop Setup ---
+        self.setup_drag_and_drop()
+    def setup_drag_and_drop(self):
+        # Try to import tkinterDnD2 for drag-and-drop support
+        try:
+            from tkinterdnd2 import DND_FILES, TkinterDnD
+        except ImportError:
+            self.logger.warning("tkinterDnD2 not installed. Drag-and-drop will not be available.")
+            return
+
+        # Re-wrap root window for DnD
+        if not hasattr(self.root, '_dnd_wrapped'):
+            try:
+                old_root = self.root
+                self.root = TkinterDnD.Tk()  # Re-wrap as DnD window
+                self.root._dnd_wrapped = True
+                # Re-create menu bar after root replacement
+                self.create_menu()
+                # Re-create widgets if needed
+                if hasattr(self, 'create_widgets'):
+                    self.create_widgets()
+                # Transfer geometry and title
+                try:
+                    self.root.geometry(old_root.geometry())
+                    self.root.title(old_root.title())
+                except Exception:
+                    pass
+            except Exception as e:
+                self.logger.warning(f"Failed to enable drag-and-drop: {e}")
+                return
+
+        # Always ensure menu bar is present after any DnD setup
+        self.create_menu()
+
+        # Enable DnD for URL listbox (for URLs)
+        try:
+            self.url_listbox.drop_target_register(DND_FILES)
+            self.url_listbox.dnd_bind('<<Drop>>', self.on_url_drop)
+        except Exception as e:
+            self.logger.warning(f"Failed to enable DnD on URL listbox: {e}")
+
+        # Enable DnD for main window (for credentials.json)
+        try:
+            self.root.drop_target_register(DND_FILES)
+            self.root.dnd_bind('<<Drop>>', self.on_credential_drop)
+        except Exception as e:
+            self.logger.warning(f"Failed to enable DnD on main window: {e}")
+
+    def on_url_drop(self, event):
+        # Accept dropped URLs (file paths or text)
+        dropped = event.data
+        if dropped:
+            # Split by whitespace (could be multiple files/URLs)
+            items = self.root.tk.splitlist(dropped)
+            for item in items:
+                if item.lower().startswith(('http://', 'https://')):
+                    if item not in self.urls:
+                        self.urls.append(item)
+                        self.url_listbox.insert(tk.END, item)
+                        self.logger.info(f"Added URL via drag-and-drop: {item}")
+                elif item.lower().endswith('.url'):
+                    # Try to read .url file for actual URL
+                    try:
+                        with open(item, 'r', encoding='utf-8') as f:
+                            for line in f:
+                                if line.strip().startswith('URL='):
+                                    url = line.strip().split('=', 1)[-1]
+                                    if url and url not in self.urls:
+                                        self.urls.append(url)
+                                        self.url_listbox.insert(tk.END, url)
+                                        self.logger.info(f"Added URL from .url file: {url}")
+                    except Exception as e:
+                        self.logger.warning(f"Failed to read .url file: {item}: {e}")
+
+    def on_credential_drop(self, event):
+        # Accept dropped credentials.json file
+        dropped = event.data
+        if dropped:
+            items = self.root.tk.splitlist(dropped)
+            for item in items:
+                if item.lower().endswith('credentials.json'):
+                    # Copy or set config to use this credentials file
+                    self.config['credentials_path'] = item
+                    self.save_config()
+                    self.logger.info(f"Set credentials.json via drag-and-drop: {item}")
+                    messagebox.showinfo("Credentials Set", f"credentials.json set to: {item}")
+                else:
+                    self.logger.info(f"Dropped file ignored (not credentials.json): {item}")
 
     def load_config(self):
         try:
@@ -185,6 +277,11 @@ class DownloaderGUI:
     def save_config(self):
         self.config["download_dir"] = self.base_dir.get()
         self.config["log_dir"] = getattr(self, "log_dir", os.path.join(os.getcwd(), "logs"))
+        # Save credentials_path if set
+        if hasattr(self, "credentials_path") and self.credentials_path:
+            self.config["credentials_path"] = self.credentials_path
+        elif "credentials_path" in self.config:
+            del self.config["credentials_path"]
         with open(self.config_path, "w", encoding="utf-8") as f:
             json.dump(self.config, f, indent=2)
 
@@ -202,6 +299,7 @@ class DownloaderGUI:
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label="Set Download Folder...", command=self.pick_download_folder)
         file_menu.add_command(label="Set Log Folder...", command=self.pick_log_folder)
+        file_menu.add_command(label="Set Credentials File...", command=self.pick_credentials_file)
         file_menu.add_separator()
         file_menu.add_command(label="Save Settings as Default", command=self.save_config)
         file_menu.add_command(label="Restore Defaults", command=self.restore_defaults)
@@ -221,6 +319,8 @@ class DownloaderGUI:
         tools_menu.add_command(label="Check for Updates", command=self.check_for_updates)
         tools_menu.add_command(label="Validate Credentials", command=self.validate_credentials)
         tools_menu.add_command(label="Test Download Link", command=self.test_download_link)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="Force Full Hash Rescan", command=self.force_full_hash_rescan)
         menubar.add_cascade(label="Tools", menu=tools_menu)
 
         # Help menu
@@ -232,17 +332,73 @@ class DownloaderGUI:
 
         self.root.config(menu=menubar)
 
+    def force_full_hash_rescan(self):
+        """Delete the hash cache file so the next scan will re-hash all files."""
+        import os
+        base_dir = self.base_dir.get()
+        hash_file_path = os.path.join(base_dir, 'existing_hashes.txt')
+        cache_file = hash_file_path + ".cache.json"
+        if os.path.exists(cache_file):
+            try:
+                os.remove(cache_file)
+                messagebox.showinfo("Hash Rescan", "Hash cache cleared. Next scan will re-hash all files.")
+            except Exception as e:
+                messagebox.showerror("Hash Rescan", f"Failed to clear hash cache: {e}")
+        else:
+            messagebox.showinfo("Hash Rescan", "No hash cache file found. Next scan will re-hash all files.")
+    def pick_credentials_file(self):
+        file_path = filedialog.askopenfilename(
+            title="Select Google Drive credentials.json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialfile="credentials.json"
+        )
+        if file_path:
+            self.credentials_path = file_path
+            self.config['credentials_path'] = file_path
+            self.save_config()
+            self.logger.info(f"Set credentials.json via File menu: {file_path}")
+            messagebox.showinfo("Credentials Set", f"credentials.json set to: {file_path}")
+
     def toggle_log_panel(self):
-        # Placeholder: implement show/hide log panel
-        pass
+        # Show/hide the status pane and its label
+        if not hasattr(self, 'status_pane_visible'):
+            self.status_pane_visible = True
+        if self.status_pane_visible:
+            self.status_pane.grid_remove()
+            if hasattr(self, '_status_pane_label'):
+                self._status_pane_label.grid_remove()
+            self.status_pane_visible = False
+        else:
+            self.status_pane.grid()
+            if hasattr(self, '_status_pane_label'):
+                self._status_pane_label.grid()
+            self.status_pane_visible = True
 
     def show_progress(self):
         # Placeholder: implement showing download progress
         pass
 
     def check_for_updates(self):
-        # Placeholder: implement update checker
-        messagebox.showinfo("Check for Updates", "This feature is not yet implemented.")
+        # Check for new commits or releases at the GitHub repository
+        import requests
+        repo_api_url = "https://api.github.com/repos/AresX0/WebsiteFileDownloader/commits"
+        try:
+            response = requests.get(repo_api_url, timeout=10)
+            if response.status_code == 200:
+                commits = response.json()
+                if commits:
+                    latest_commit = commits[0]
+                    latest_sha = latest_commit.get('sha', '')
+                    latest_msg = latest_commit.get('commit', {}).get('message', '')
+                    # Optionally, compare with a local version/sha if tracked
+                    message = f"Latest commit SHA: {latest_sha[:7]}\nMessage: {latest_msg}\n\nSee all changes at:\nhttps://github.com/AresX0/WebsiteFileDownloader/commits/main"
+                    self.thread_safe_popup("Update Check", message)
+                else:
+                    self.thread_safe_popup("Update Check", "No commits found in the repository.")
+            else:
+                self.thread_safe_popup("Update Check", f"Failed to check updates. Status code: {response.status_code}")
+        except Exception as e:
+            self.thread_safe_popup("Update Check", f"Error checking for updates:\n{e}")
 
     def validate_credentials(self):
         # Placeholder: implement credentials validation
@@ -256,15 +412,21 @@ class DownloaderGUI:
         about_text = (
             f"EpsteinFilesDownloader v{__version__}\n"
             "\n(C) 2025\n"
-            "Author: Your Name\n"
+            "Author: JosephThePlatypus\n"
             "License: MIT\n"
             "\nA GUI tool for downloading Epstein court records and related files."
         )
         messagebox.showinfo("About", about_text)
 
     def report_issue(self):
-        # Placeholder: open a URL or show instructions
-        messagebox.showinfo("Report Issue", "To report an issue or send feedback, visit:\nhttps://github.com/yourrepo/issues")
+        # Open the user's GitHub issues page for reporting issues
+        repo_url = "https://github.com/AresX0/WebsiteFileDownloader/issues"
+        try:
+            import webbrowser
+            webbrowser.open(repo_url)
+            messagebox.showinfo("Report Issue", f"Your browser has been opened to the issues page:\n{repo_url}")
+        except Exception:
+            messagebox.showinfo("Report Issue", f"To report an issue or send feedback, visit:\n{repo_url}")
 
     def pick_download_folder(self):
         folder = filedialog.askdirectory(title="Select Download Folder")
@@ -286,24 +448,41 @@ class DownloaderGUI:
 
     def get_help_text(self):
         return (
-            "EpsteinFilesDownloader v{}\n\n".format(__version__)
-            + "Features:\n"
+            f"EpsteinFilesDownloader v{__version__}\n\n"
+            "Features:\n"
             "- Download court records and files from preset or custom URLs.\n"
             "- Google Drive support (API or gdown fallback).\n"
             "- Multithreaded downloads, hash checking, and duplicate skipping.\n"
             "- Progress bar, skipped files, and JSON export.\n"
-            "- Menu options for download/log folder, dark/light mode, and restoring defaults.\n"
+            "- Menu options for download/log folder, dark/light mode, restoring defaults, and more.\n"
             "- All logs saved to a user-chosen folder.\n\n"
-            "Prerequisites:\n"
-            "- Python 3.8+\n"
-            "- Required packages: playwright, requests, gdown, google-api-python-client, google-auth, google-auth-httplib2\n"
-            "- Playwright browsers (auto-installed)\n\n"
-            "Usage:\n"
-            "- Use the File menu to set download/log folders or restore defaults.\n"
-            "- Use the View menu to toggle dark/light mode.\n"
-            "- Use the Help menu for this documentation.\n"
+            "Menu Options:\n"
+            "File Menu:\n"
+            "  - Set Download Folder: Choose where files are saved.\n"
+            "  - Set Log Folder: Choose where logs are saved.\n"
+            "  - Set Credentials File: Select Google Drive credentials.json.\n"
+            "  - Save Settings as Default: Save current folders and credentials for next session.\n"
+            "  - Restore Defaults: Reset all settings to default values.\n"
+            "  - Exit: Close the application.\n\n"
+            "View Menu:\n"
+            "  - Toggle Dark/Light Mode: Switch between dark and light themes.\n"
+            "  - Show/Hide Log Panel: Show or hide the log/status pane.\n"
+            "  - Show Download Progress: Display the download progress bar.\n\n"
+            "Tools Menu:\n"
+            "  - Check for Updates: Check for new versions on GitHub.\n"
+            "  - Validate Credentials: Check if your Google Drive credentials are valid.\n"
+            "  - Test Download Link: Test if a download link is working.\n"
+            "  - Force Full Hash Rescan: Clear the hash cache and force a full file hash scan on next download.\n\n"
+            "Help Menu:\n"
+            "  - Help: Show this help/documentation.\n"
+            "  - About: Show version and author information.\n"
+            "  - Report Issue / Send Feedback: Open the GitHub issues page for bug reports or feedback.\n\n"
+            "Other Usage Notes:\n"
             "- Start downloads with the Start Download button.\n"
             "- For Google Drive, you will be prompted for credentials.json or gdown fallback.\n"
+            "- Drag and drop URLs or credentials.json into the window.\n"
+            "- Skipped files and download progress are shown in the log/status pane.\n"
+            "- Hash scanning is cached for 4 hours for speed; use Tools > Force Full Hash Rescan to override.\n"
         )
 
     # --- Utility Methods ---
@@ -338,10 +517,10 @@ class DownloaderGUI:
         except Exception as e:
             self.logger.error(f"Exception in start_download: {e}", exc_info=True)
         # Prompt for credentials.json location if needed
-        credentials_path = None
+        credentials_path = self.config.get('credentials_path', None)
         for url in self.urls:
             if url.startswith('https://drive.google.com/drive/folders/'):
-                if credentials_path is None:
+                if not credentials_path:
                     credentials_path = filedialog.askopenfilename(
                         title="Select Google Drive credentials.json (Cancel to use gdown fallback)",
                         filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
@@ -454,26 +633,36 @@ class DownloaderGUI:
                 all_files.update(sub_all or set())
 
         def download_file_task(abs_url, rel_path, local_path):
-            try:
-                if not self.validate_url(abs_url):
-                    self.logger.warning(f"Skipping invalid URL: {abs_url}")
-                    skipped_files.add(abs_url)
+            max_retries = 3
+            delay = 2
+            for attempt in range(1, max_retries + 1):
+                try:
+                    if not self.validate_url(abs_url):
+                        self.logger.warning(f"Skipping invalid URL: {abs_url}")
+                        skipped_files.add(abs_url)
+                        return
+                    if os.path.exists(local_path):
+                        self.logger.info(f"Skipping (already exists): {local_path}")
+                        skipped_files.add(local_path)
+                        return
+                    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                    self.logger.info(f"Downloading {abs_url} -> {local_path} (Attempt {attempt})")
+                    with requests.get(abs_url, stream=True, timeout=300) as r:
+                        r.raise_for_status()
+                        with open(local_path, 'wb') as f:
+                            for chunk in r.iter_content(chunk_size=8192):
+                                if chunk:
+                                    f.write(chunk)
+                    self.logger.info(f"Downloaded: {abs_url}")
                     return
-                if os.path.exists(local_path):
-                    self.logger.info(f"Skipping (already exists): {local_path}")
-                    skipped_files.add(local_path)
-                    return
-                os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                self.logger.info(f"Downloading {abs_url} -> {local_path}")
-                with requests.get(abs_url, stream=True, timeout=300) as r:
-                    r.raise_for_status()
-                    with open(local_path, 'wb') as f:
-                        for chunk in r.iter_content(chunk_size=8192):
-                            if chunk:
-                                f.write(chunk)
-            except Exception as e:
-                self.logger.error(f"Failed to download {abs_url}: {e}\nContinuing...")
-                skipped_files.add(abs_url)
+                except Exception as e:
+                    self.logger.error(f"Failed to download {abs_url} (Attempt {attempt}): {e}")
+                    if attempt < max_retries:
+                        time.sleep(delay)
+                        delay *= 2  # Exponential backoff
+                    else:
+                        self.logger.error(f"Permanently failed to download {abs_url} after {max_retries} attempts.")
+                        skipped_files.add(abs_url)
 
         try:
             with ThreadPoolExecutor(max_workers=num_threads) as executor:
@@ -528,9 +717,34 @@ class DownloaderGUI:
         self.root.after(0, append)
 
     def create_widgets(self):
-        # Main frame
-        frame = ttk.Frame(self.root)
-        frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        # Make window scalable
+        self.root.geometry('1100x800')
+        self.root.minsize(800, 600)
+        self.root.rowconfigure(0, weight=1)
+        self.root.columnconfigure(0, weight=1)
+
+        # Container frame for scrollable content (so menu bar is not covered)
+        container = ttk.Frame(self.root)
+        container.grid(row=0, column=0, sticky='nsew')
+        container.rowconfigure(0, weight=1)
+        container.columnconfigure(0, weight=1)
+
+        # Add a scrollable canvas for the main content
+        canvas = tk.Canvas(container)
+        canvas.grid(row=0, column=0, sticky='nsew')
+        vscroll = ttk.Scrollbar(container, orient='vertical', command=canvas.yview)
+        vscroll.grid(row=0, column=1, sticky='ns')
+        canvas.configure(yscrollcommand=vscroll.set)
+        frame = ttk.Frame(canvas)
+        frame_id = canvas.create_window((0, 0), window=frame, anchor='nw')
+
+        def on_frame_configure(event):
+            canvas.configure(scrollregion=canvas.bbox('all'))
+        frame.bind('<Configure>', on_frame_configure)
+
+        def on_canvas_configure(event):
+            canvas.itemconfig(frame_id, width=event.width)
+        canvas.bind('<Configure>', on_canvas_configure)
 
         # Title
         title = ttk.Label(frame, text="Epstein Court Records Downloader", font=("Segoe UI", 20, "bold"))
@@ -568,9 +782,10 @@ class DownloaderGUI:
         self.add_tooltip(dir_entry, "Edit or paste the download folder path")
 
         # Action Buttons
-        self.download_btn = ttk.Button(frame, text="Start Download", command=self.start_download_thread)
+
+        self.download_btn = ttk.Button(frame, text="Start Download", command=self.start_download_all_thread)
         self.download_btn.grid(row=4, column=0, pady=10, sticky="ew")
-        self.add_tooltip(self.download_btn, "Start downloading all files from the URLs above")
+        self.add_tooltip(self.download_btn, "Start downloading all files from the URLs above (runs in background, UI stays responsive)")
 
         self.schedule_btn = ttk.Button(frame, text="Schedule Download", command=self.open_schedule_window)
         self.schedule_btn.grid(row=4, column=1, pady=10, sticky="ew")
@@ -596,6 +811,7 @@ class DownloaderGUI:
         status_pane_label.grid(row=7, column=0, sticky="w", pady=(10, 0))
         self.status_pane = st.ScrolledText(frame, height=10, width=100, state='disabled', wrap='word')
         self.status_pane.grid(row=8, column=0, columnspan=4, sticky="nsew", pady=(0, 10))
+        self.status_pane_visible = True
 
         # Status Bar
         self.status_label = ttk.Label(frame, textvariable=self.status, foreground='blue', anchor='w')
@@ -614,9 +830,14 @@ class DownloaderGUI:
         # Make widgets expand with window
         for i in range(4):
             frame.columnconfigure(i, weight=1)
-        self.root.rowconfigure(0, weight=1)
-        self.root.columnconfigure(0, weight=1)
+        for i in range(11):
+            frame.rowconfigure(i, weight=0)
         frame.rowconfigure(8, weight=1)
+
+        # Store references for toggling log panel
+        self._main_canvas = canvas
+        self._main_frame = frame
+        self._status_pane_label = status_pane_label
 
     def remove_url(self):
         selection = self.url_listbox.curselection()
@@ -737,7 +958,57 @@ class DownloaderGUI:
 
     def start_download_thread(self):
         self.logger.debug("start_download_thread called.")
-        threading.Thread(target=self.start_download, daemon=True).start()
+        # Start the download queue in a background thread
+        threading.Thread(target=self.process_download_queue, daemon=True).start()
+
+    def process_download_queue(self):
+        """
+        Implements a download queue system. Each URL is queued and processed in order, with progress bar updates.
+        """
+        import queue
+        self.thread_safe_status("Preparing download queue...")
+        url_queue = queue.Queue()
+        for url in self.urls:
+            url_queue.put(url)
+        base_dir = self.base_dir.get()
+        os.makedirs(base_dir, exist_ok=True)
+        self.setup_logger(base_dir)
+        total = url_queue.qsize()
+        self.progress['maximum'] = total
+        self.progress['value'] = 0
+        self.logger.info(f"Download queue started. {total} URLs queued.")
+        processed = 0
+        try:
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context()
+                page = context.new_page()
+                while not url_queue.empty():
+                    url = url_queue.get()
+                    self.thread_safe_status(f"Processing: {url}")
+                    if url.startswith('https://drive.google.com/drive/folders/'):
+                        credentials_path = self.config.get('credentials_path', None)
+                        gdrive_dir = os.path.join(base_dir, 'GoogleDrive')
+                        self.logger.info(f"Processing Google Drive folder: {url}")
+                        self.download_gdrive_with_fallback(url, gdrive_dir, credentials_path)
+                    else:
+                        self.logger.info(f"Visiting: {url}")
+                        s, t, a = self.download_files_threaded(page, url, base_dir, skipped_files=self.skipped_files, file_tree=self.file_tree)
+                        self.skipped_files.update(s or set())
+                        self.file_tree.update(t or {})
+                    url_queue.task_done()
+                    processed += 1
+                    self.progress['value'] = processed
+                    self.root.update_idletasks()
+                browser.close()
+        except Exception as e:
+            self.logger.error(f"Exception in download queue: {e}", exc_info=True)
+        self.progress['value'] = total
+        self.root.update_idletasks()
+        self.logger.info("All downloads in queue complete.")
+        self.thread_safe_status("All downloads in queue complete.")
+        messagebox.showinfo("Download Complete", "All downloads in the queue are complete. See the log for details.")
 
     def download_gdrive_folder(self, folder_url, output_dir):
         import gdown
@@ -746,14 +1017,36 @@ class DownloaderGUI:
         os.makedirs(output_dir, exist_ok=True)
         logger.info(f"Starting Google Drive folder download: {folder_url} to {output_dir}")
         try:
-            logger.info(f"Calling gdown.download_folder for: {folder_url}")
-            downloaded_files = gdown.download_folder(url=folder_url, output=output_dir, quiet=False, use_cookies=False, remaining_ok=True)
-            logger.info(f"gdown.download_folder returned {len(downloaded_files)} files.")
+            # Scan for all files in the folder (metadata only)
+            logger.info(f"Scanning Google Drive folder for file list: {folder_url}")
+            file_list = gdown.download_folder(url=folder_url, output=output_dir, quiet=True, use_cookies=False, remaining_ok=True, return_filelist=True, skip_download=True)
+            logger.info(f"Found {len(file_list)} files in Google Drive folder.")
+            to_download = []
+            for f in file_list:
+                if not os.path.exists(f):
+                    to_download.append(f)
+                else:
+                    logger.info(f"Skipping (already exists): {f}")
+            logger.info(f"{len(to_download)} files to download (missing locally).")
             result = []
-            for dest_path in downloaded_files:
+            failed = []
+            max_retries = 3
+            for dest_path in to_download:
                 rel_path = os.path.relpath(dest_path, output_dir)
-                logger.info(f"Downloaded Google Drive file: {rel_path} to {dest_path}")
-                result.append((rel_path, dest_path))
+                for attempt in range(1, max_retries + 1):
+                    try:
+                        logger.info(f"Downloading {rel_path} (Attempt {attempt})")
+                        gdown.cached_download(dest_path, quiet=False)
+                        logger.info(f"Downloaded Google Drive file: {rel_path} to {dest_path}")
+                        result.append((rel_path, dest_path))
+                        break
+                    except Exception as e:
+                        logger.error(f"Failed to download {rel_path} (Attempt {attempt}): {e}")
+                        if attempt == max_retries:
+                            logger.error(f"Permanently failed to download {rel_path} after {max_retries} attempts.")
+                            failed.append(rel_path)
+            if failed:
+                logger.error(f"Failed to download {len(failed)} files from Google Drive after retries: {failed}")
             logger.info(f"Completed Google Drive folder download: {folder_url}")
             return result
         except Exception as e:
@@ -779,14 +1072,81 @@ class DownloaderGUI:
     def build_existing_hash_file(self, base_dir, hash_file_path):
         """
         Scan all files in base_dir, compute hashes, and store them in a file (one per line: hash<tab>path).
+        Shows progress in the status pane. Uses multithreading for speed.
+        Skips hashing files whose hash was updated within the last 4 hours (uses a cache file).
         """
+        import threading
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import os, time, json
+        CACHE_HOURS = 4
+        cache_file = hash_file_path + ".cache.json"
+        now = time.time()
+        # Load cache if exists
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, "r", encoding="utf-8") as cf:
+                    hash_cache = json.load(cf)
+            except Exception:
+                hash_cache = {}
+        else:
+            hash_cache = {}
+
+        all_files = []
+        for root, dirs, files in os.walk(base_dir):
+            for f in files:
+                all_files.append(os.path.join(root, f))
+        total = len(all_files)
+        if total == 0:
+            self.thread_safe_status("No files found for scanning.")
+            return
+
+        def hash_file_worker(path):
+            relpath = os.path.relpath(path, base_dir).replace('\\', '/').lower()
+            filename = os.path.basename(path).lower()
+            cache_entry = hash_cache.get(path)
+            if cache_entry:
+                cached_hash, cached_time = cache_entry
+                if now - cached_time < CACHE_HOURS * 3600:
+                    return (path, cached_hash, relpath, filename, cached_time)
+            # Not cached or cache expired, compute hash
+            file_hash = self.hash_file(path)
+            return (path, file_hash, relpath, filename, now)
+
+        # Use 50% of available CPU threads, at least 1
+        try:
+            cpu_count = os.cpu_count() or 2
+            max_workers = max(1, cpu_count // 2)
+        except Exception:
+            max_workers = 4
+
+        results = [None] * total
+        self._existing_files = dict()  # (filename.lower(), relpath.lower()) -> hash
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_idx = {executor.submit(hash_file_worker, path): idx for idx, path in enumerate(all_files)}
+            for count, future in enumerate(as_completed(future_to_idx), 1):
+                idx = future_to_idx[future]
+                path, file_hash, relpath, filename, hash_time = future.result()
+                results[idx] = (path, file_hash)
+                # Track all filenames and relpaths with their hash
+                self._existing_files[(filename, relpath)] = file_hash
+                # Update cache
+                if file_hash:
+                    hash_cache[path] = (file_hash, hash_time)
+                if count % 25 == 0 or count == total:
+                    msg = f"Scanning for existing files: {count}/{total} ({int(count/total*100) if total else 100}%)"
+                    self.root.after(0, self.thread_safe_status, msg)
+
+        # Save updated cache
+        try:
+            with open(cache_file, "w", encoding="utf-8") as cf:
+                json.dump(hash_cache, cf)
+        except Exception:
+            pass
+
         with open(hash_file_path, 'w', encoding='utf-8') as hf:
-            for root, dirs, files in os.walk(base_dir):
-                for f in files:
-                    full_path = os.path.join(root, f)
-                    file_hash = self.hash_file(full_path)
-                    if file_hash:
-                        hf.write(f"{file_hash}\t{full_path}\n")
+            for path, file_hash in results:
+                if file_hash:
+                    hf.write(f"{file_hash}\t{path}\n")
 
     def hash_exists_in_file(self, hash_file_path, file_hash):
         """
@@ -805,119 +1165,125 @@ class DownloaderGUI:
         with open(hash_file_path, 'a', encoding='utf-8') as hf:
             hf.write(f"{file_hash}\t{file_path}\n")
 
+
+    def start_download_all_thread(self):
+        import threading
+        threading.Thread(target=self.download_all, daemon=True).start()
+
     def download_all(self):
-        self.thread_safe_status("Starting download...")
-        urls = list(self.urls)
-        base_dir = self.base_dir.get()
-        # Normalize to lower-case for comparison, but preserve user input
-        base_dir_cmp = base_dir.lower()
-        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        download_dir = os.path.join(base_dir, timestamp)
-        os.makedirs(download_dir, exist_ok=True)
-        # Scan for all existing files in base_dir and subfolders
-        self.thread_safe_status("Scanning for existing files...")
-        self.root.update_idletasks()
-        self.hash_file_path = os.path.join(base_dir, 'existing_hashes.txt')
-        self.setup_logger(base_dir)
-        self.logger.info(f"Starting download. URLs: {urls}")
-        try:
-            self.build_existing_hash_file(base_dir_cmp, self.hash_file_path)
-        except Exception as e:
-            self.logger.error(f"Failed to build hash file: {e}")
-            messagebox.showerror("Error", f"Failed to scan existing files: {e}")
-            return
-        self.skipped_files = set()
-        self.file_tree = {}
-        all_files = set()
-        total = len(urls)
-        self.progress['maximum'] = total
-        try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                context = browser.new_context()
-                page = context.new_page()
-                for i, url in enumerate(urls):
-                    self.thread_safe_status(f"Visiting: {url}")
-                    self.logger.info(f"Visiting: {url}")
-                    self.progress['value'] = i
-                    self.root.update_idletasks()
-                    if url.startswith('https://drive.google.com/drive/folders/'):
-                        gdrive_dir = os.path.join(download_dir, 'GoogleDrive')
+        import threading
+        def run():
+            self.thread_safe_status("Starting download...")
+            urls = list(self.urls)
+            base_dir = self.base_dir.get()
+            base_dir_cmp = base_dir.lower()
+            os.makedirs(base_dir, exist_ok=True)
+            # Scan for all existing files in base_dir and subfolders
+            self.thread_safe_status("Scanning for existing files...")
+            self.root.update_idletasks()
+            self.hash_file_path = os.path.join(base_dir, 'existing_hashes.txt')
+            self.setup_logger(base_dir)
+            self.logger.info(f"Starting download. URLs: {urls}")
+            try:
+                self.build_existing_hash_file(base_dir_cmp, self.hash_file_path)
+            except Exception as e:
+                self.logger.error(f"Failed to build hash file: {e}")
+                self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to scan existing files: {e}"))
+                return
+            self.skipped_files = set()
+            self.file_tree = {}
+            all_files = set()
+            total = len(urls)
+            self.progress['maximum'] = total
+            try:
+                from playwright.sync_api import sync_playwright
+                with sync_playwright() as p:
+                    browser = p.chromium.launch(headless=True)
+                    context = browser.new_context()
+                    page = context.new_page()
+                    for i, url in enumerate(urls):
+                        self.thread_safe_status(f"Visiting: {url}")
+                        self.logger.info(f"Visiting: {url}")
+                        self.progress['value'] = i
+                        self.root.update_idletasks()
+                        if url.startswith('https://drive.google.com/drive/folders/'):
+                            gdrive_dir = os.path.join(base_dir, 'GoogleDrive')
+                            try:
+                                gdrive_files = self.download_gdrive_folder(url, gdrive_dir)
+                                # Add Google Drive files to file_tree and all_files
+                                for rel_path, dest_path in gdrive_files:
+                                    folder = os.path.dirname(dest_path)
+                                    if folder not in self.file_tree:
+                                        self.file_tree[folder] = []
+                                    self.file_tree[folder].append(dest_path)
+                                    all_files.add('gdrive://' + rel_path)
+                                self.logger.info(f"Downloaded Google Drive folder: {url}")
+                            except Exception as e:
+                                self.logger.error(f"Failed to download Google Drive folder {url}: {e}")
+                                self.root.after(0, lambda url=url, e=e: messagebox.showerror("Error", f"Failed to download Google Drive folder: {url}\n{e}"))
+                            continue
                         try:
-                            gdrive_files = self.download_gdrive_folder(url, gdrive_dir)
-                            # Add Google Drive files to file_tree and all_files
-                            for rel_path, dest_path in gdrive_files:
-                                folder = os.path.dirname(dest_path)
-                                if folder not in self.file_tree:
-                                    self.file_tree[folder] = []
-                                self.file_tree[folder].append(dest_path)
-                                all_files.add('gdrive://' + rel_path)
-                            self.logger.info(f"Downloaded Google Drive folder: {url}")
+                            s, t, a = self.download_files(page, url, base_dir)
+                            self.skipped_files.update(s or set())
+                            self.file_tree.update(t or {})
+                            all_files.update(a or set())
                         except Exception as e:
-                            self.logger.error(f"Failed to download Google Drive folder {url}: {e}")
-                            messagebox.showerror("Error", f"Failed to download Google Drive folder: {url}\n{e}")
-                        continue
+                            self.logger.error(f"Error downloading from {url}: {e}")
+                            self.root.after(0, lambda url=url, e=e: messagebox.showerror("Error", f"Error downloading from {url}: {e}"))
+                    browser.close()
+            except Exception as e:
+                self.logger.error(f"Critical error in Playwright: {e}")
+                self.root.after(0, lambda e=e: messagebox.showerror("Error", f"Critical error in Playwright: {e}"))
+                return
+            self.thread_safe_status("Download complete. Checking for missing files...")
+            self.logger.info("Download complete. Checking for missing files...")
+            self.progress['value'] = total
+            self.root.update_idletasks()
+            # Save JSON
+            json_path = os.path.join(base_dir, 'epstein_file_tree.json')
+            try:
+                with open(json_path, 'w', encoding='utf-8') as jf:
+                    json.dump(self.file_tree, jf, indent=2)
+                self.logger.info(f"File tree JSON saved: {json_path}")
+            except Exception as e:
+                self.logger.error(f"Failed to save JSON: {e}")
+                self.root.after(0, lambda e=e: messagebox.showerror("Error", f"Failed to save JSON: {e}"))
+            self.downloaded_json.set(json_path)
+            # Check for missing files
+            missing_files = []
+            for url in all_files:
+                if url.startswith('gdrive://'):
+                    rel_path = url.replace('gdrive://', '')
+                    local_path = os.path.join(base_dir, 'GoogleDrive', rel_path)
+                else:
+                    rel_path = self.sanitize_path(url.replace('https://', ''))
+                    local_path = os.path.join(base_dir, rel_path)
+                if not os.path.exists(local_path):
+                    missing_files.append((url, local_path))
+            if missing_files:
+                self.thread_safe_status(f"Downloading {len(missing_files)} missing files...")
+                self.logger.warning(f"{len(missing_files)} missing files detected. Retrying...")
+                for url, local_path in missing_files:
                     try:
-                        s, t, a = self.download_files(page, url, download_dir)
-                        self.skipped_files.update(s or set())
-                        self.file_tree.update(t or {})
-                        all_files.update(a or set())
+                        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                        if url.startswith('gdrive://'):
+                            # Redownload Google Drive file by name (not implemented: would require mapping rel_path to file_id)
+                            self.logger.error(f"Cannot redownload missing Google Drive file automatically: {url}")
+                        else:
+                            with requests.get(url, stream=True) as r:
+                                r.raise_for_status()
+                                with open(local_path, 'wb') as f:
+                                    for chunk in r.iter_content(chunk_size=8192):
+                                        if chunk:
+                                            f.write(chunk)
+                            self.logger.info(f"Successfully downloaded missing file: {url}")
                     except Exception as e:
-                        self.logger.error(f"Error downloading from {url}: {e}")
-                        messagebox.showerror("Error", f"Error downloading from {url}: {e}")
-                browser.close()
-        except Exception as e:
-            self.logger.error(f"Critical error in Playwright: {e}")
-            messagebox.showerror("Error", f"Critical error in Playwright: {e}")
-            return
-        self.thread_safe_status("Download complete. Checking for missing files...")
-        self.logger.info("Download complete. Checking for missing files...")
-        self.progress['value'] = total
-        self.root.update_idletasks()
-        # Save JSON
-        json_path = os.path.join(download_dir, 'epstein_file_tree.json')
-        try:
-            with open(json_path, 'w', encoding='utf-8') as jf:
-                json.dump(self.file_tree, jf, indent=2)
-            self.logger.info(f"File tree JSON saved: {json_path}")
-        except Exception as e:
-            self.logger.error(f"Failed to save JSON: {e}")
-            messagebox.showerror("Error", f"Failed to save JSON: {e}")
-        self.downloaded_json.set(json_path)
-        # Check for missing files
-        missing_files = []
-        for url in all_files:
-            if url.startswith('gdrive://'):
-                rel_path = url.replace('gdrive://', '')
-                local_path = os.path.join(download_dir, 'GoogleDrive', rel_path)
+                        self.logger.error(f"Failed to download missing file {url}: {e}")
+                self.thread_safe_status("Download complete (with missing files retried).")
             else:
-                rel_path = self.sanitize_path(url.replace('https://', ''))
-                local_path = os.path.join(download_dir, rel_path)
-            if not os.path.exists(local_path):
-                missing_files.append((url, local_path))
-        if missing_files:
-            self.thread_safe_status(f"Downloading {len(missing_files)} missing files...")
-            self.logger.warning(f"{len(missing_files)} missing files detected. Retrying...")
-            for url, local_path in missing_files:
-                try:
-                    os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                    if url.startswith('gdrive://'):
-                        # Redownload Google Drive file by name (not implemented: would require mapping rel_path to file_id)
-                        self.logger.error(f"Cannot redownload missing Google Drive file automatically: {url}")
-                    else:
-                        with requests.get(url, stream=True) as r:
-                            r.raise_for_status()
-                            with open(local_path, 'wb') as f:
-                                for chunk in r.iter_content(chunk_size=8192):
-                                    if chunk:
-                                        f.write(chunk)
-                        self.logger.info(f"Successfully downloaded missing file: {url}")
-                except Exception as e:
-                    self.logger.error(f"Failed to download missing file {url}: {e}")
-            self.thread_safe_status("Download complete (with missing files retried).")
-        else:
-            self.thread_safe_status("Download complete. No missing files.")
-            self.logger.info("No missing files after download.")
+                self.thread_safe_status("Download complete. No missing files.")
+                self.logger.info("No missing files after download.")
+        threading.Thread(target=run, daemon=True).start()
 
     def download_files(self, page, base_url, base_dir, visited=None, skipped_files=None, file_tree=None, all_files=None):
         from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -971,29 +1337,35 @@ class DownloaderGUI:
                     file_tree[folder] = []
                 file_tree[folder].append(local_path)
                 all_files.add(abs_url)
-                # Check for duplicate by hash
+                # Skip download if file with same name, relpath, and hash exists
+                filename = os.path.basename(local_path)
+                filename_lc = filename.lower()
+                relpath = os.path.relpath(local_path, base_dir).replace('\\', '/').lower()
                 file_hash = None
-                try:
-                    # Try to get hash of remote file (HEAD request for Content-Length, or download first chunk)
-                    # But for now, only check if a file with the same hash exists locally
-                    # If file exists locally, check hash
-                    if os.path.exists(local_path):
-                        file_hash = self.hash_file(local_path)
-                        if file_hash and self.hash_exists_in_file(self.hash_file_path, file_hash):
-                            print(f"Skipping (duplicate by hash): {local_path}")
+                exists = False
+                save_path = local_path
+                if hasattr(self, '_existing_files'):
+                    if (filename_lc, relpath) in self._existing_files:
+                        # If file exists at this path, check hash
+                        try:
+                            file_hash = self.hash_file(local_path)
+                        except Exception:
+                            file_hash = None
+                        if file_hash and file_hash == self._existing_files[(filename_lc, relpath)]:
+                            self.logger.info(f"Skipping (already exists, same hash): {local_path}")
                             skipped_files.add(local_path)
-                            continue
-                    # After download, append new hash to file
-                    # If not, check if any file with the same hash exists in the scanned tree
-                    # (This is a quick check, not a remote hash check)
-                except Exception as e:
-                    print(f"Hash check failed for {local_path}: {e}")
-                # If file was just downloaded, append its hash
-                if os.path.exists(local_path):
-                    file_hash = self.hash_file(local_path)
-                    if file_hash:
-                        self.append_hash_to_file(self.hash_file_path, file_hash, local_path)
-                download_info.append((abs_url, local_path, folder))
+                            exists = True
+                        else:
+                            # Conflict: file exists but hash is different, save as filename-YYYYMMDD_HHMMSS.ext
+                            import datetime
+                            base, ext = os.path.splitext(filename)
+                            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+                            new_filename = f"{base}-{timestamp}{ext}"
+                            save_path = os.path.join(folder, new_filename)
+                            self.logger.info(f"Filename conflict: saving as {save_path}")
+                if exists:
+                    continue
+                download_info.append((abs_url, save_path, folder))
             elif (
                 abs_url != base_url
                 and any(abs_url.startswith(domain) for domain in allowed_domains)
