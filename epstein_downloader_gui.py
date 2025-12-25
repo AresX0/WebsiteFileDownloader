@@ -164,7 +164,7 @@ class DownloaderGUI:
         self.config = self.load_config()
         # Override defaults if config exists
         if self.config.get("download_dir"):
-            self.base_dir.set(self.config["download_dir"])
+            self.base_dir = tk.StringVar(value=r'C:\Downloads\Epstein')
         if self.config.get("log_dir"):
             self.log_dir = self.config["log_dir"]
         else:
