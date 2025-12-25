@@ -144,23 +144,7 @@ check_and_install("gdown")
 class DownloaderGUI:
     def __init__(self, root):
         self.root = root
-        self.logger = logging.getLogger("EpsteinFilesDownloader")
-        self.logger.setLevel(logging.DEBUG)
-        # Always log to file and console
-        self.log_dir = getattr(self, 'log_dir', os.path.join(os.getcwd(), "logs"))
-        os.makedirs(self.log_dir, exist_ok=True)
-        log_path = os.path.join(self.log_dir, f"epstein_downloader_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
-        file_handler = logging.FileHandler(log_path, encoding='utf-8')
-        file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-        stream_handler = logging.StreamHandler()
-        stream_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-        # Remove all handlers first to avoid duplicates
-        if self.logger.hasHandlers():
-            self.logger.handlers.clear()
-        self.logger.addHandler(file_handler)
-        self.logger.addHandler(stream_handler)
-        self.logger.debug(f"EpsteinFilesDownloader v{__version__} started. Log file: {log_path}")
+        # Logger setup is handled by setup_logger below
         self.urls = [
             'https://www.justice.gov/epstein/foia',
             'https://www.justice.gov/epstein/court-records',
@@ -185,6 +169,9 @@ class DownloaderGUI:
             self.log_dir = self.config["log_dir"]
         else:
             self.log_dir = os.path.join(os.getcwd(), "logs")
+        os.makedirs(self.log_dir, exist_ok=True)
+        self.setup_logger(self.log_dir)
+        self.logger.debug(f"EpsteinFilesDownloader v{__version__} started. Log file: {self.log_file}")
         self.create_menu()
         self.create_widgets()
 
@@ -204,7 +191,9 @@ class DownloaderGUI:
     def restore_defaults(self):
         self.base_dir.set(r'C:\Temp\Epstein')
         self.log_dir = os.path.join(os.getcwd(), "logs")
+        os.makedirs(self.log_dir, exist_ok=True)
         self.save_config()
+        self.setup_logger(self.log_dir)
         messagebox.showinfo("Defaults Restored", "Settings have been restored to defaults.")
 
     def create_menu(self):
@@ -214,19 +203,68 @@ class DownloaderGUI:
         file_menu.add_command(label="Set Download Folder...", command=self.pick_download_folder)
         file_menu.add_command(label="Set Log Folder...", command=self.pick_log_folder)
         file_menu.add_separator()
+        file_menu.add_command(label="Save Settings as Default", command=self.save_config)
         file_menu.add_command(label="Restore Defaults", command=self.restore_defaults)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.root.quit)
         menubar.add_cascade(label="File", menu=file_menu)
+
         # View menu
         view_menu = tk.Menu(menubar, tearoff=0)
         view_menu.add_command(label="Toggle Dark/Light Mode", command=self.toggle_dark_mode)
+        view_menu.add_command(label="Show/Hide Log Panel", command=self.toggle_log_panel)
+        view_menu.add_command(label="Show Download Progress", command=self.show_progress)
         menubar.add_cascade(label="View", menu=view_menu)
+
+        # Tools menu
+        tools_menu = tk.Menu(menubar, tearoff=0)
+        tools_menu.add_command(label="Check for Updates", command=self.check_for_updates)
+        tools_menu.add_command(label="Validate Credentials", command=self.validate_credentials)
+        tools_menu.add_command(label="Test Download Link", command=self.test_download_link)
+        menubar.add_cascade(label="Tools", menu=tools_menu)
+
         # Help menu
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label="Help", command=self.show_help)
+        help_menu.add_command(label="About", command=self.show_about)
+        help_menu.add_command(label="Report Issue / Send Feedback", command=self.report_issue)
         menubar.add_cascade(label="Help", menu=help_menu)
+
         self.root.config(menu=menubar)
+
+    def toggle_log_panel(self):
+        # Placeholder: implement show/hide log panel
+        pass
+
+    def show_progress(self):
+        # Placeholder: implement showing download progress
+        pass
+
+    def check_for_updates(self):
+        # Placeholder: implement update checker
+        messagebox.showinfo("Check for Updates", "This feature is not yet implemented.")
+
+    def validate_credentials(self):
+        # Placeholder: implement credentials validation
+        messagebox.showinfo("Validate Credentials", "This feature is not yet implemented.")
+
+    def test_download_link(self):
+        # Placeholder: implement download link tester
+        messagebox.showinfo("Test Download Link", "This feature is not yet implemented.")
+
+    def show_about(self):
+        about_text = (
+            f"EpsteinFilesDownloader v{__version__}\n"
+            "\n(C) 2025\n"
+            "Author: Your Name\n"
+            "License: MIT\n"
+            "\nA GUI tool for downloading Epstein court records and related files."
+        )
+        messagebox.showinfo("About", about_text)
+
+    def report_issue(self):
+        # Placeholder: open a URL or show instructions
+        messagebox.showinfo("Report Issue", "To report an issue or send feedback, visit:\nhttps://github.com/yourrepo/issues")
 
     def pick_download_folder(self):
         folder = filedialog.askdirectory(title="Select Download Folder")
@@ -238,7 +276,9 @@ class DownloaderGUI:
         folder = filedialog.askdirectory(title="Select Log Folder")
         if folder:
             self.log_dir = folder
+            os.makedirs(self.log_dir, exist_ok=True)
             self.save_config()
+            self.setup_logger(self.log_dir)
 
     def show_help(self):
         help_text = self.get_help_text()
@@ -445,19 +485,22 @@ class DownloaderGUI:
         return skipped_files, file_tree, all_files
 
     def setup_logger(self, log_dir):
+        os.makedirs(log_dir, exist_ok=True)
         log_path = os.path.join(log_dir, f"epstein_downloader_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
         self.log_file = log_path
-        self.logger = logging.getLogger("EpsteinDownloader")
+        self.logger = logging.getLogger("EpsteinFilesDownloader")
         self.logger.setLevel(logging.DEBUG)
+        if self.logger.hasHandlers():
+            self.logger.handlers.clear()
         fh = logging.FileHandler(log_path, encoding='utf-8')
         fh.setLevel(logging.DEBUG)
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         fh.setFormatter(formatter)
-        if self.logger.hasHandlers():
-            self.logger.handlers.clear()
         self.logger.addHandler(fh)
-
-        # Add a custom handler to also write to the status pane
+        sh = logging.StreamHandler()
+        sh.setLevel(logging.INFO)
+        sh.setFormatter(formatter)
+        self.logger.addHandler(sh)
         class StatusPaneHandler(logging.Handler):
             def __init__(self, gui):
                 super().__init__()
@@ -469,7 +512,6 @@ class DownloaderGUI:
         status_handler.setLevel(logging.INFO)
         status_handler.setFormatter(formatter)
         self.logger.addHandler(status_handler)
-
         self.logger.info("Logger initialized.")
 
     def thread_safe_status(self, msg):
@@ -1046,12 +1088,23 @@ class DownloaderGUI:
                 status, done = downloader.next_chunk()
             fh.close()
 
-        os.makedirs(gdrive_dir, exist_ok=True)
+        # Ensure gdrive_dir is a directory, not a file
+        if os.path.exists(gdrive_dir):
+            if os.path.isfile(gdrive_dir):
+                self.logger.error(f"Cannot create directory '{gdrive_dir}' because a file with the same name exists. Skipping this folder.")
+                return
+        else:
+            os.makedirs(gdrive_dir, exist_ok=True)
+
         files = list_files(service, folder_id)
         for f in files:
             if f['mimeType'] == 'application/vnd.google-apps.folder':
                 # Recursively download subfolders
                 subfolder = os.path.join(gdrive_dir, f['name'])
+                # Check for file/dir conflict for subfolder
+                if os.path.exists(subfolder) and os.path.isfile(subfolder):
+                    self.logger.error(f"Cannot create subdirectory '{subfolder}' because a file with the same name exists. Skipping this subfolder.")
+                    continue
                 self.download_drive_folder_api(f['id'], subfolder, credentials_path)
             else:
                 self.logger.info(f"Downloading from Google Drive: {f['name']}")
