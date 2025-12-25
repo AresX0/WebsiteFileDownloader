@@ -98,6 +98,14 @@ class DownloaderGUI:
         self.scheduled = False
         self.create_widgets()
 
+    def validate_url(self, url):
+        # Basic URL validation: checks scheme and netloc
+        try:
+            result = urllib.parse.urlparse(url)
+            return all([result.scheme in ("http", "https"), result.netloc])
+        except Exception:
+            return False
+
     def start_download(self):
         base_dir = self.base_dir.get()
         os.makedirs(base_dir, exist_ok=True)
@@ -861,6 +869,11 @@ class DownloaderGUI:
 
 def main():
     root = tk.Tk()
+    root.title("EpsteinFilesDownloader")
+    try:
+        root.iconbitmap("JosephThePlatypus.ico")
+    except Exception as e:
+        print(f"Warning: Could not set window icon: {e}")
     app = DownloaderGUI(root)
     root.mainloop()
 
