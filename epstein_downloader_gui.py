@@ -1,7 +1,69 @@
+# EpsteinFilesDownloader v1.0.0
+# (C) 2025 - Refactored for clarity, maintainability, and efficiency
+
+__version__ = "1.0.0"
+
+
 import io
-from googleapiclient.discovery import build
-from google.oauth2 import service_account
-from googleapiclient.http import MediaIoBaseDownload
+import os
+import re
+import sys
+import urllib.parse
+import json
+import threading
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+from datetime import datetime
+from pathlib import Path
+import requests
+import time
+import importlib.util
+import subprocess
+import glob
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import hashlib
+import logging
+
+# --- Dependency Checks and Playwright Setup ---
+def ensure_pip():
+    try:
+        import pip
+    except ImportError:
+        print("pip not found. Attempting to install pip...")
+        import ensurepip
+        ensurepip.bootstrap()
+        import pip
+
+def check_and_install(package, pip_name=None):
+    pip_name = pip_name or package
+    if importlib.util.find_spec(package) is None:
+        print(f"Missing required package: {pip_name}. Installing...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", pip_name])
+        except Exception as e:
+            print(f"Failed to install {pip_name}: {e}")
+            raise
+
+ensure_pip()
+for pkg in ("playwright", "requests", "gdown", "google-api-python-client", "google-auth", "google-auth-httplib2"):
+    check_and_install(pkg)
+
+def ensure_playwright_browsers():
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            try:
+                p.chromium.launch(headless=True).close()
+            except Exception:
+                print("Playwright browsers not found or not installed. Installing...")
+                subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium"])
+    except Exception as e:
+        print(f"Error ensuring Playwright browsers: {e}")
+        raise
+
+ensure_playwright_browsers()
+
+# --- DownloaderGUI Class ---
 
 import os
 import re
@@ -82,6 +144,23 @@ check_and_install("gdown")
 class DownloaderGUI:
     def __init__(self, root):
         self.root = root
+        self.logger = logging.getLogger("EpsteinFilesDownloader")
+        self.logger.setLevel(logging.DEBUG)
+        # Always log to file and console
+        self.log_dir = getattr(self, 'log_dir', os.path.join(os.getcwd(), "logs"))
+        os.makedirs(self.log_dir, exist_ok=True)
+        log_path = os.path.join(self.log_dir, f"epstein_downloader_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+        file_handler = logging.FileHandler(log_path, encoding='utf-8')
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        # Remove all handlers first to avoid duplicates
+        if self.logger.hasHandlers():
+            self.logger.handlers.clear()
+        self.logger.addHandler(file_handler)
+        self.logger.addHandler(stream_handler)
+        self.logger.debug(f"EpsteinFilesDownloader v{__version__} started. Log file: {log_path}")
         self.urls = [
             'https://www.justice.gov/epstein/foia',
             'https://www.justice.gov/epstein/court-records',
@@ -96,37 +175,141 @@ class DownloaderGUI:
         self.downloaded_json = tk.StringVar(value="")
         self.dark_mode = False
         self.scheduled = False
+        # Load config
+        self.config_path = os.path.join(os.getcwd(), "config.json")
+        self.config = self.load_config()
+        # Override defaults if config exists
+        if self.config.get("download_dir"):
+            self.base_dir.set(self.config["download_dir"])
+        if self.config.get("log_dir"):
+            self.log_dir = self.config["log_dir"]
+        else:
+            self.log_dir = os.path.join(os.getcwd(), "logs")
+        self.create_menu()
         self.create_widgets()
 
+    def load_config(self):
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def save_config(self):
+        self.config["download_dir"] = self.base_dir.get()
+        self.config["log_dir"] = getattr(self, "log_dir", os.path.join(os.getcwd(), "logs"))
+        with open(self.config_path, "w", encoding="utf-8") as f:
+            json.dump(self.config, f, indent=2)
+
+    def restore_defaults(self):
+        self.base_dir.set(r'C:\Temp\Epstein')
+        self.log_dir = os.path.join(os.getcwd(), "logs")
+        self.save_config()
+        messagebox.showinfo("Defaults Restored", "Settings have been restored to defaults.")
+
+    def create_menu(self):
+        menubar = tk.Menu(self.root)
+        # File menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Set Download Folder...", command=self.pick_download_folder)
+        file_menu.add_command(label="Set Log Folder...", command=self.pick_log_folder)
+        file_menu.add_separator()
+        file_menu.add_command(label="Restore Defaults", command=self.restore_defaults)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.root.quit)
+        menubar.add_cascade(label="File", menu=file_menu)
+        # View menu
+        view_menu = tk.Menu(menubar, tearoff=0)
+        view_menu.add_command(label="Toggle Dark/Light Mode", command=self.toggle_dark_mode)
+        menubar.add_cascade(label="View", menu=view_menu)
+        # Help menu
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="Help", command=self.show_help)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        self.root.config(menu=menubar)
+
+    def pick_download_folder(self):
+        folder = filedialog.askdirectory(title="Select Download Folder")
+        if folder:
+            self.base_dir.set(folder)
+            self.save_config()
+
+    def pick_log_folder(self):
+        folder = filedialog.askdirectory(title="Select Log Folder")
+        if folder:
+            self.log_dir = folder
+            self.save_config()
+
+    def show_help(self):
+        help_text = self.get_help_text()
+        self.show_popup("Help", help_text)
+
+    def get_help_text(self):
+        return (
+            "EpsteinFilesDownloader v{}\n\n".format(__version__)
+            + "Features:\n"
+            "- Download court records and files from preset or custom URLs.\n"
+            "- Google Drive support (API or gdown fallback).\n"
+            "- Multithreaded downloads, hash checking, and duplicate skipping.\n"
+            "- Progress bar, skipped files, and JSON export.\n"
+            "- Menu options for download/log folder, dark/light mode, and restoring defaults.\n"
+            "- All logs saved to a user-chosen folder.\n\n"
+            "Prerequisites:\n"
+            "- Python 3.8+\n"
+            "- Required packages: playwright, requests, gdown, google-api-python-client, google-auth, google-auth-httplib2\n"
+            "- Playwright browsers (auto-installed)\n\n"
+            "Usage:\n"
+            "- Use the File menu to set download/log folders or restore defaults.\n"
+            "- Use the View menu to toggle dark/light mode.\n"
+            "- Use the Help menu for this documentation.\n"
+            "- Start downloads with the Start Download button.\n"
+            "- For Google Drive, you will be prompted for credentials.json or gdown fallback.\n"
+        )
+
+    # --- Utility Methods ---
     def validate_url(self, url):
-        # Basic URL validation: checks scheme and netloc
+        """Basic URL validation: checks scheme and netloc."""
         try:
             result = urllib.parse.urlparse(url)
             return all([result.scheme in ("http", "https"), result.netloc])
         except Exception:
             return False
 
+    # --- Download Logic ---
     def start_download(self):
+        self.logger.debug("start_download called.")
         base_dir = self.base_dir.get()
         os.makedirs(base_dir, exist_ok=True)
         self.setup_logger(base_dir)
-        # Download all other files first
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context()
-            page = context.new_page()
-            for url in self.urls:
-                if url.startswith('https://drive.google.com/drive/folders/'):
-                    continue
-                self.logger.info(f"Visiting: {url}")
-                s, t, a = self.download_files_threaded(page, url, base_dir, skipped_files=self.skipped_files, file_tree=self.file_tree)
-                self.skipped_files.update(s or set())
-                self.file_tree.update(t or {})
-            browser.close()
-        # Download Google Drive folders last
-        credentials_path = 'credentials.json'
+        try:
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context()
+                page = context.new_page()
+                for url in self.urls:
+                    if url.startswith('https://drive.google.com/drive/folders/'):
+                        continue
+                    self.logger.info(f"Visiting: {url}")
+                    s, t, a = self.download_files_threaded(page, url, base_dir, skipped_files=self.skipped_files, file_tree=self.file_tree)
+                    self.skipped_files.update(s or set())
+                    self.file_tree.update(t or {})
+                browser.close()
+        except Exception as e:
+            self.logger.error(f"Exception in start_download: {e}", exc_info=True)
+        # Prompt for credentials.json location if needed
+        credentials_path = None
         for url in self.urls:
             if url.startswith('https://drive.google.com/drive/folders/'):
+                if credentials_path is None:
+                    credentials_path = filedialog.askopenfilename(
+                        title="Select Google Drive credentials.json (Cancel to use gdown fallback)",
+                        filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                        initialfile="credentials.json"
+                    )
+                    if not credentials_path:
+                        self.logger.warning("No credentials.json selected. Will use gdown fallback for Google Drive download.")
+                        credentials_path = None
                 gdrive_dir = os.path.join(base_dir, 'GoogleDrive')
                 self.logger.info(f"Processing Google Drive folder: {url}")
                 self.download_gdrive_with_fallback(url, gdrive_dir, credentials_path)
@@ -140,26 +323,32 @@ class DownloaderGUI:
             folder_id = match.group(1)
             if os.path.exists(credentials_path):
                 try:
+                    os.makedirs(gdrive_dir, exist_ok=True)
                     self.download_drive_folder_api(folder_id, gdrive_dir, credentials_path)
-                    return
                 except Exception as e:
                     self.logger.error(f"Google Drive API download failed: {e}")
                     self.logger.info("Falling back to gdown...")
-            else:
-                self.logger.warning("credentials.json not found. Attempting gdown fallback...")
-            try:
-                import gdown
-                gdown.download_folder(url=url, output=gdrive_dir, quiet=False, use_cookies=False, remaining_ok=True)
-            except Exception as e2:
-                self.logger.error(f"gdown fallback failed: {e2}")
-                messagebox.showinfo(
-                    "Google Drive Credentials Required",
-                    "To enable full Google Drive access, create a credentials.json file as follows:\n"
-                    "1. Go to https://console.cloud.google.com/\n"
-                    "2. Create/select a project, enable the Google Drive API.\n"
-                    "3. Go to 'APIs & Services > Credentials', create a Service Account, and download the JSON key.\n"
-                    "4. Save it as credentials.json in this folder.\n"
-                )
+                    try:
+                        import gdown
+                        os.makedirs(gdrive_dir, exist_ok=True)
+                        # Download all files, but skip those that already exist
+                        file_list = gdown.download_folder(url=url, output=gdrive_dir, quiet=False, use_cookies=False, remaining_ok=True, return_filelist=True)
+                        if file_list:
+                            for f in file_list:
+                                if os.path.exists(f):
+                                    self.logger.info(f"Skipping (already exists): {f}")
+                                else:
+                                    gdown.cached_download(f, quiet=False)
+                    except Exception as e2:
+                        self.logger.error(f"gdown fallback failed: {e2}")
+                        messagebox.showinfo(
+                            "Google Drive Credentials Required",
+                            "To enable full Google Drive access, create a credentials.json file as follows:\n"
+                            "1. Go to https://console.cloud.google.com/\n"
+                            "2. Create/select a project, enable the Google Drive API.\n"
+                            "3. Go to 'APIs & Services > Credentials', create a Service Account, and download the JSON key.\n"
+                            "4. Save it as credentials.json in this folder.\n"
+                        )
         else:
             self.logger.error("Google Drive folder ID not found in URL.")
 
@@ -505,6 +694,7 @@ class DownloaderGUI:
         threading.Thread(target=check_and_run, daemon=True).start()
 
     def start_download_thread(self):
+        self.logger.debug("start_download_thread called.")
         threading.Thread(target=self.start_download, daemon=True).start()
 
     def download_gdrive_folder(self, folder_url, output_dir):
