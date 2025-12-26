@@ -1585,7 +1585,7 @@ class DownloaderGUI:
         self._main_frame = self.frame
 
         # Persistent Status Bar (bottom of window) with summary
-        self.summary_var = tk.StringVar(value="Queued: 0 | Completed: 0 | Failed: 0")
+        self.summary_var = tk.StringVar(value="Queued: 0 | Completed: 0 | Failed: 0 | Skipped: 0 | Duplicates: 0 | Total: 0")
         status_frame = ttk.Frame(self.root)
         status_frame.grid(row=1, column=0, sticky='ew')
         status_frame.columnconfigure(1, weight=1)
@@ -1594,7 +1594,7 @@ class DownloaderGUI:
         self.summary_bar = ttk.Label(status_frame, textvariable=self.summary_var, relief=tk.SUNKEN, anchor='e', foreground='green')
         self.summary_bar.grid(row=0, column=1, sticky='ew')
         self.add_tooltip(self.status_bar, "Persistent status bar. Shows the latest status message.")
-        self.add_tooltip(self.summary_bar, "Summary: queued, completed, failed counts.")
+        self.add_tooltip(self.summary_bar, "Summary: queued, completed, failed, skipped, duplicates, total counts.")
 
         # Quit and Dark Mode buttons (always visible, bottom row of main frame)
         quit_btn = ttk.Button(self.frame, text="Quit", command=self.force_quit)
@@ -1604,17 +1604,26 @@ class DownloaderGUI:
         dark_btn.grid(row=13, column=3, sticky="e", pady=(10, 0))
         self.add_tooltip(dark_btn, "Switch between light and dark mode")
 
-    def update_summary_bar(self, queued=None, completed=None, failed=None):
+    def update_summary_bar(self, queued=None, completed=None, failed=None, skipped=None, duplicates=None, total=None):
         # Update the summary bar with current counts
         if not hasattr(self, '_summary_counts'):
-            self._summary_counts = {'queued': 0, 'completed': 0, 'failed': 0}
+            self._summary_counts = {'queued': 0, 'completed': 0, 'failed': 0, 'skipped': 0, 'duplicates': 0, 'total': 0}
         if queued is not None:
             self._summary_counts['queued'] = queued
         if completed is not None:
             self._summary_counts['completed'] = completed
         if failed is not None:
             self._summary_counts['failed'] = failed
-        self.summary_var.set(f"Queued: {self._summary_counts['queued']} | Completed: {self._summary_counts['completed']} | Failed: {self._summary_counts['failed']}")
+        if skipped is not None:
+            self._summary_counts['skipped'] = skipped
+        if duplicates is not None:
+            self._summary_counts['duplicates'] = duplicates
+        if total is not None:
+            self._summary_counts['total'] = total
+        self.summary_var.set(
+            f"Queued: {self._summary_counts['queued']} | Completed: {self._summary_counts['completed']} | Failed: {self._summary_counts['failed']} | "
+            f"Skipped: {self._summary_counts['skipped']} | Duplicates: {self._summary_counts['duplicates']} | Total: {self._summary_counts['total']}"
+        )
 
         # Make widgets expand with window
         for i in range(4):
@@ -1851,7 +1860,11 @@ class DownloaderGUI:
 
     def process_download_queue(self):
         # Track summary counts
-        self.update_summary_bar(queued=len(self.urls), completed=0, failed=0)
+        # Calculate total, skipped, duplicates for summary
+        total = len(self.urls)
+        skipped = len(getattr(self, 'skipped_files', set()))
+        duplicates = len(getattr(self, 'duplicate_files', set())) if hasattr(self, 'duplicate_files') else 0
+        self.update_summary_bar(queued=len(self.urls), completed=0, failed=0, skipped=skipped, duplicates=duplicates, total=total)
         """
         Implements a download queue system. Each URL is queued and processed in order, with progress bar updates.
         Allows dynamic add/remove of URLs during download. Skips duplicate files.
@@ -1914,18 +1927,27 @@ class DownloaderGUI:
                         processed += 1
                         self.processed_count = processed
                         self.progress['value'] = processed
-                        self.update_summary_bar(queued=url_queue.qsize(), completed=processed, failed=failed_count)
+                        skipped = len(getattr(self, 'skipped_files', set()))
+                        duplicates = len(getattr(self, 'duplicate_files', set())) if hasattr(self, 'duplicate_files') else 0
+                        total = total  # already set above
+                        self.update_summary_bar(queued=url_queue.qsize(), completed=processed, failed=failed_count, skipped=skipped, duplicates=duplicates, total=total)
                         self.root.update_idletasks()
                         self.save_queue_state()
                     except Exception as e:
                         failed_count += 1
-                        self.update_summary_bar(queued=url_queue.qsize(), completed=processed, failed=failed_count)
+                        skipped = len(getattr(self, 'skipped_files', set()))
+                        duplicates = len(getattr(self, 'duplicate_files', set())) if hasattr(self, 'duplicate_files') else 0
+                        total = total  # already set above
+                        self.update_summary_bar(queued=url_queue.qsize(), completed=processed, failed=failed_count, skipped=skipped, duplicates=duplicates, total=total)
                         self.logger.error(f"Exception processing {url}: {e}", exc_info=True)
                 browser.close()
         except Exception as e:
             self.logger.error(f"Exception in download queue: {e}", exc_info=True)
         self.progress['value'] = total
-        self.update_summary_bar(queued=0, completed=processed, failed=failed_count)
+        skipped = len(getattr(self, 'skipped_files', set()))
+        duplicates = len(getattr(self, 'duplicate_files', set())) if hasattr(self, 'duplicate_files') else 0
+        total = total  # already set above
+        self.update_summary_bar(queued=0, completed=processed, failed=failed_count, skipped=skipped, duplicates=duplicates, total=total)
         self.root.update_idletasks()
         self.logger.info("All downloads in queue complete.")
         self.thread_safe_status("All downloads in queue complete.")
