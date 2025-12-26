@@ -345,54 +345,18 @@ class DownloaderGUI:
         self.url_menu.add_command(label="Copy URL", command=self.copy_selected_url)
         self.url_menu.add_command(label="Open in Browser", command=self.open_selected_url_in_browser)
         self.url_listbox.bind("<Button-3>", self.show_url_context_menu)
+        # Add tooltips for context menu actions (optional, if add_tooltip supports Menu items)
 
     def show_url_context_menu(self, event):
+        # Select the item under the mouse
+        index = self.url_listbox.nearest(event.y)
+        self.url_listbox.selection_clear(0, tk.END)
+        self.url_listbox.selection_set(index)
+        self.url_listbox.activate(index)
         try:
-            # Select the item under the mouse
-            index = self.url_listbox.nearest(event.y)
-            self.url_listbox.selection_clear(0, tk.END)
-            self.url_listbox.selection_set(index)
-            self.url_listbox.activate(index)
             self.url_menu.tk_popup(event.x_root, event.y_root)
         finally:
             self.url_menu.grab_release()
-            self.logger.handlers.clear()
-        fh = logging.FileHandler(self.log_file, encoding='utf-8')
-        fh.setLevel(logging.DEBUG)
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        fh.setFormatter(formatter)
-        self.logger.addHandler(fh)
-        sh = logging.StreamHandler()
-        sh.setLevel(logging.INFO)
-        sh.setFormatter(formatter)
-        self.logger.addHandler(sh)
-        # Now safe to load config and restore queue state
-        self.config = self.load_config()
-        self.restore_queue_state()
-        # Override defaults if config exists
-        if self.config.get("download_dir"):
-            self.base_dir = tk.StringVar(value=r'C:\Downloads\Epstein')
-        if self.config.get("concurrent_downloads"):
-            try:
-                self.concurrent_downloads.set(int(self.config["concurrent_downloads"]))
-            except Exception:
-                pass
-        if self.config.get("log_dir"):
-            self.log_dir = self.config["log_dir"]
-        if self.config.get("credentials_path"):
-            self.credentials_path = self.config["credentials_path"]
-        else:
-            self.credentials_path = None
-        os.makedirs(self.log_dir, exist_ok=True)
-        self.error_log_path = os.path.join(self.log_dir, "error.log")
-        self.setup_logger(self.log_dir)
-        self.logger.debug(f"EpsteinFilesDownloader v{__version__} started. Log file: {self.log_file}")
-        self.create_menu()
-        self.create_widgets()
-        # --- Drag and Drop Setup ---
-        self.setup_drag_and_drop()
-        # Hook for saving queue state on close
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def save_queue_state(self):
         try:
