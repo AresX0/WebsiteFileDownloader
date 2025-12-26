@@ -24,44 +24,76 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import logging
 
+
 # --- Dependency Checks and Playwright Setup ---
-def ensure_pip():
-    try:
-        import pip
-    except ImportError:
-        print("pip not found. Attempting to install pip...")
-        import ensurepip
-        ensurepip.bootstrap()
-        import pip
-
-def check_and_install(package, pip_name=None):
-    pip_name = pip_name or package
-    if importlib.util.find_spec(package) is None:
-        print(f"Missing required package: {pip_name}. Installing...")
+def install_dependencies_with_progress(root=None):
+    import importlib.util
+    import subprocess
+    import sys
+    import tkinter as tk
+    from tkinter import ttk
+    # Modal progress dialog
+    progress_win = None
+    progress_var = None
+    progress_label = None
+    def show_progress(msg):
+        nonlocal progress_win, progress_var, progress_label
+        if root is None:
+            return
+        if progress_win is None:
+            progress_win = tk.Toplevel(root)
+            progress_win.title("Installing Dependencies")
+            progress_win.geometry("400x120")
+            progress_win.transient(root)
+            progress_win.grab_set()
+            progress_label = ttk.Label(progress_win, text=msg)
+            progress_label.pack(pady=20)
+            progress_var = tk.StringVar(value=msg)
+        else:
+            progress_label.config(text=msg)
+        progress_win.update_idletasks()
+    def close_progress():
+        if progress_win:
+            progress_win.destroy()
+    def ensure_pip():
         try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", pip_name])
-        except Exception as e:
-            print(f"Failed to install {pip_name}: {e}")
-            raise
-
-ensure_pip()
-for pkg in ("playwright", "requests", "gdown", "google-api-python-client", "google-auth", "google-auth-httplib2"):
-    check_and_install(pkg)
-
-def ensure_playwright_browsers():
-    try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
+            import pip
+        except ImportError:
+            show_progress("pip not found. Installing pip...")
+            import ensurepip
+            ensurepip.bootstrap()
+            import pip
+    def check_and_install(package, pip_name=None):
+        pip_name = pip_name or package
+        if importlib.util.find_spec(package) is None:
+            show_progress(f"Installing {pip_name}...")
             try:
-                p.chromium.launch(headless=True).close()
-            except Exception:
-                print("Playwright browsers not found or not installed. Installing...")
-                subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium"])
-    except Exception as e:
-        print(f"Error ensuring Playwright browsers: {e}")
-        raise
+                subprocess.check_call([sys.executable, "-m", "pip", "install", pip_name])
+            except Exception as e:
+                close_progress()
+                if root:
+                    messagebox.showerror("Dependency Error", f"Failed to install {pip_name}: {e}")
+                raise
+    ensure_pip()
+    for pkg in ("playwright", "requests", "gdown", "google-api-python-client", "google-auth", "google-auth-httplib2"):
+        check_and_install(pkg)
+    def ensure_playwright_browsers():
+        try:
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as p:
+                try:
+                    p.chromium.launch(headless=True).close()
+                except Exception:
+                    show_progress("Installing Playwright browsers...")
+                    subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium"])
+        except Exception as e:
+            close_progress()
+            if root:
+                messagebox.showerror("Playwright Error", f"Error ensuring Playwright browsers: {e}")
+            raise
+    ensure_playwright_browsers()
+    close_progress()
 
-ensure_playwright_browsers()
 
 # --- DownloaderGUI Class ---
 
@@ -107,10 +139,15 @@ def check_and_install(package, pip_name=None):
 # Ensure pip is available
 ensure_pip()
 
+
 # Check and install prerequisites
 check_and_install("playwright")
 check_and_install("requests")
 check_and_install("gdown")
+try:
+    check_and_install("tkinterdnd2")
+except Exception as e:
+    print(f"Warning: Could not install tkinterDnD2: {e}")
 
 # Ensure Playwright browsers are installed
 def ensure_playwright_browsers():
@@ -141,8 +178,13 @@ check_and_install("requests")
 check_and_install("gdown")
 
 
+
 class DownloaderGUI:
     def __init__(self, root):
+        # Pause/resume event for downloads
+        self._pause_event = threading.Event()
+        self._pause_event.set()  # Not paused by default
+        self._is_paused = False
         self.root = root
         # Logger setup is handled by setup_logger below
         self.urls = [
@@ -174,12 +216,29 @@ class DownloaderGUI:
         else:
             self.credentials_path = None
         os.makedirs(self.log_dir, exist_ok=True)
+        self.error_log_path = os.path.join(self.log_dir, "error.log")
         self.setup_logger(self.log_dir)
         self.logger.debug(f"EpsteinFilesDownloader v{__version__} started. Log file: {self.log_file}")
         self.create_menu()
         self.create_widgets()
         # --- Drag and Drop Setup ---
         self.setup_drag_and_drop()
+
+    def log_error(self, err: Exception, context: str = ""):  # Utility for error logging and dialog
+        import traceback
+        msg = f"[{datetime.now().isoformat()}] {context}\n{type(err).__name__}: {err}\n{traceback.format_exc()}\n"
+        try:
+            with open(self.error_log_path, "a", encoding="utf-8") as f:
+                f.write(msg)
+        except Exception:
+            pass
+        self.show_error_dialog(str(err), context)
+
+    def show_error_dialog(self, error_msg, context=""):
+        try:
+            messagebox.showerror("Error", f"{context}\n{error_msg}" if context else error_msg)
+        except Exception:
+            print(f"Error: {context} {error_msg}")
     def setup_drag_and_drop(self):
         # Try to import tkinterDnD2 for drag-and-drop support
         try:
@@ -304,6 +363,11 @@ class DownloaderGUI:
         file_menu.add_command(label="Save Settings as Default", command=self.save_config)
         file_menu.add_command(label="Restore Defaults", command=self.restore_defaults)
         file_menu.add_separator()
+        file_menu.add_command(label="Export Settings...", command=self.export_settings)
+        file_menu.add_command(label="Import Settings...", command=self.import_settings)
+        file_menu.add_separator()
+        file_menu.add_command(label="Settings Dialog...", command=self.open_settings_dialog)
+        file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.root.quit)
         menubar.add_cascade(label="File", menu=file_menu)
 
@@ -331,6 +395,84 @@ class DownloaderGUI:
         menubar.add_cascade(label="Help", menu=help_menu)
 
         self.root.config(menu=menubar)
+
+    def export_settings(self):
+        """Export current settings to a user-chosen JSON file."""
+        file_path = filedialog.asksaveasfilename(
+            title="Export Settings As",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialfile="epstein_downloader_settings.json"
+        )
+        if file_path:
+            try:
+                self.save_config()  # Ensure config is up to date
+                with open(file_path, "w", encoding="utf-8") as f:
+                    json.dump(self.config, f, indent=2)
+                messagebox.showinfo("Export Settings", f"Settings exported to: {file_path}")
+            except Exception as e:
+                self.log_error(e, "Export Settings")
+
+    def import_settings(self):
+        """Import settings from a user-chosen JSON file."""
+        file_path = filedialog.askopenfilename(
+            title="Import Settings",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialfile="epstein_downloader_settings.json"
+        )
+        if file_path:
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    imported = json.load(f)
+                # Update config and UI
+                self.config.update(imported)
+                if "download_dir" in imported:
+                    self.base_dir.set(imported["download_dir"])
+                if "log_dir" in imported:
+                    self.log_dir = imported["log_dir"]
+                    os.makedirs(self.log_dir, exist_ok=True)
+                if "credentials_path" in imported:
+                    self.credentials_path = imported["credentials_path"]
+                self.save_config()
+                self.setup_logger(self.log_dir)
+                messagebox.showinfo("Import Settings", f"Settings imported from: {file_path}")
+            except Exception as e:
+                self.log_error(e, "Import Settings")
+
+    def open_settings_dialog(self):
+        """Open a dialog to view and edit key settings."""
+        win = tk.Toplevel(self.root)
+        win.title("Settings")
+        win.geometry("500x300")
+        ttk.Label(win, text="Download Folder:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
+        download_var = tk.StringVar(value=self.base_dir.get())
+        download_entry = ttk.Entry(win, textvariable=download_var, width=50)
+        download_entry.grid(row=0, column=1, padx=10, pady=10)
+        ttk.Label(win, text="Log Folder:").grid(row=1, column=0, sticky="w", padx=10, pady=10)
+        log_var = tk.StringVar(value=getattr(self, "log_dir", os.path.join(os.getcwd(), "logs")))
+        log_entry = ttk.Entry(win, textvariable=log_var, width=50)
+        log_entry.grid(row=1, column=1, padx=10, pady=10)
+        ttk.Label(win, text="Credentials File:").grid(row=2, column=0, sticky="w", padx=10, pady=10)
+        cred_var = tk.StringVar(value=getattr(self, "credentials_path", ""))
+        cred_entry = ttk.Entry(win, textvariable=cred_var, width=50)
+        cred_entry.grid(row=2, column=1, padx=10, pady=10)
+
+        def save_and_close():
+            self.base_dir.set(download_var.get())
+            self.log_dir = log_var.get()
+            os.makedirs(self.log_dir, exist_ok=True)
+            self.credentials_path = cred_var.get() if cred_var.get() else None
+            self.save_config()
+            self.setup_logger(self.log_dir)
+            win.destroy()
+            messagebox.showinfo("Settings", "Settings updated.")
+
+        save_btn = ttk.Button(win, text="Save", command=save_and_close)
+        save_btn.grid(row=3, column=0, columnspan=2, pady=20)
+        self.add_tooltip(download_entry, "Edit the download folder path.")
+        self.add_tooltip(log_entry, "Edit the log folder path.")
+        self.add_tooltip(cred_entry, "Edit the path to credentials.json.")
+        self.add_tooltip(save_btn, "Save changes to settings.")
 
     def force_full_hash_rescan(self):
         """Delete the hash cache file so the next scan will re-hash all files."""
@@ -636,6 +778,9 @@ class DownloaderGUI:
             max_retries = 3
             delay = 2
             for attempt in range(1, max_retries + 1):
+                # Pause support
+                while not self._pause_event.is_set():
+                    time.sleep(0.1)
                 try:
                     if not self.validate_url(abs_url):
                         self.logger.warning(f"Skipping invalid URL: {abs_url}")
@@ -651,6 +796,8 @@ class DownloaderGUI:
                         r.raise_for_status()
                         with open(local_path, 'wb') as f:
                             for chunk in r.iter_content(chunk_size=8192):
+                                while not self._pause_event.is_set():
+                                    time.sleep(0.1)
                                 if chunk:
                                     f.write(chunk)
                     self.logger.info(f"Downloaded: {abs_url}")
@@ -723,11 +870,29 @@ class DownloaderGUI:
         self.root.rowconfigure(0, weight=1)
         self.root.columnconfigure(0, weight=1)
 
+
+        # Tabbed notebook for main UI and download history
+        self._notebook = ttk.Notebook(self.root)
+        self._notebook.grid(row=0, column=0, sticky='nsew')
+
+
+        # Main tab (existing UI)
+        main_tab = ttk.Frame(self._notebook)
+        main_tab.grid_rowconfigure(0, weight=1)
+        main_tab.grid_columnconfigure(0, weight=1)
+        self._notebook.add(main_tab, text="Downloader")
+
+        # Download history tab
+        history_tab = ttk.Frame(self._notebook)
+        history_tab.grid_rowconfigure(0, weight=1)
+        history_tab.grid_columnconfigure(0, weight=1)
+        self._notebook.add(history_tab, text="Download History")
+
         # Container frame for scrollable content (so menu bar is not covered)
-        container = ttk.Frame(self.root)
+        container = ttk.Frame(main_tab)
         container.grid(row=0, column=0, sticky='nsew')
-        container.rowconfigure(0, weight=1)
-        container.columnconfigure(0, weight=1)
+        container.grid_rowconfigure(0, weight=1)
+        container.grid_columnconfigure(0, weight=1)
 
         # Add a scrollable canvas for the main content
         canvas = tk.Canvas(container)
@@ -746,6 +911,7 @@ class DownloaderGUI:
             canvas.itemconfig(frame_id, width=event.width)
         canvas.bind('<Configure>', on_canvas_configure)
 
+        # --- Main Downloader UI ---
         # Title
         title = ttk.Label(frame, text="Epstein Court Records Downloader", font=("Segoe UI", 20, "bold"))
         title.grid(row=0, column=0, columnspan=4, pady=(0, 20), sticky="nsew")
@@ -758,14 +924,13 @@ class DownloaderGUI:
         self.url_listbox.grid(row=0, column=0, columnspan=3, sticky="ew")
         for url in self.urls:
             self.url_listbox.insert(tk.END, url)
+        self.add_tooltip(self.url_listbox, "List of URLs to download. Select to remove or view details.")
         self.url_entry = ttk.Entry(url_section, width=60)
         self.url_entry.grid(row=1, column=0, sticky="ew", pady=5)
         add_url_btn = ttk.Button(url_section, text="Add URL", command=self.add_url)
         add_url_btn.grid(row=1, column=1, sticky="w", padx=(5, 0))
         self.add_tooltip(add_url_btn, "Add a new download URL")
         self.add_tooltip(self.url_entry, "Paste a new URL and click 'Add URL'")
-
-        # Remove URL Button (move to main frame for visibility)
         remove_url_btn = ttk.Button(frame, text="Remove URL", command=self.remove_url)
         remove_url_btn.grid(row=2, column=0, pady=(0, 10), sticky="ew")
         self.add_tooltip(remove_url_btn, "Remove the selected URL from the list")
@@ -782,62 +947,121 @@ class DownloaderGUI:
         self.add_tooltip(dir_entry, "Edit or paste the download folder path")
 
         # Action Buttons
-
         self.download_btn = ttk.Button(frame, text="Start Download", command=self.start_download_all_thread)
         self.download_btn.grid(row=4, column=0, pady=10, sticky="ew")
         self.add_tooltip(self.download_btn, "Start downloading all files from the URLs above (runs in background, UI stays responsive)")
-
+        self.pause_btn = ttk.Button(frame, text="Pause", command=self.pause_downloads)
+        self.pause_btn.grid(row=4, column=1, pady=10, sticky="ew")
+        self.add_tooltip(self.pause_btn, "Pause all downloads in progress.")
+        self.resume_btn = ttk.Button(frame, text="Resume", command=self.resume_downloads, state='disabled')
+        self.resume_btn.grid(row=4, column=2, pady=10, sticky="ew")
+        self.add_tooltip(self.resume_btn, "Resume paused downloads.")
         self.schedule_btn = ttk.Button(frame, text="Schedule Download", command=self.open_schedule_window)
-        self.schedule_btn.grid(row=4, column=1, pady=10, sticky="ew")
+        self.schedule_btn.grid(row=4, column=3, pady=10, sticky="ew")
         self.add_tooltip(self.schedule_btn, "Schedule downloads for specific days and times")
-
         self.json_btn = ttk.Button(frame, text="Show Downloaded JSON", command=self.show_json)
-        self.json_btn.grid(row=4, column=2, pady=10, sticky="ew")
+        self.json_btn.grid(row=5, column=0, pady=10, sticky="ew")
         self.add_tooltip(self.json_btn, "Show the JSON file of downloaded files")
-
         self.skipped_btn = ttk.Button(frame, text="Show Skipped Files", command=self.show_skipped)
-        self.skipped_btn.grid(row=4, column=3, pady=10, sticky="ew")
+        self.skipped_btn.grid(row=5, column=1, pady=10, sticky="ew")
         self.add_tooltip(self.skipped_btn, "Show files that were skipped (already exist or duplicate)")
 
         # Progress Section
         progress_label = ttk.Label(frame, text="Progress:")
-        progress_label.grid(row=5, column=0, sticky="w", pady=(10, 0))
+        progress_label.grid(row=6, column=0, sticky="w", pady=(10, 0))
+        self.add_tooltip(progress_label, "Shows the overall download progress.")
         self.progress = ttk.Progressbar(frame, orient='horizontal', length=400, mode='determinate')
-        self.progress.grid(row=6, column=0, columnspan=4, pady=(0, 10), sticky="ew")
+        self.progress.grid(row=7, column=0, columnspan=4, pady=(0, 10), sticky="ew")
+        self.add_tooltip(self.progress, "Overall progress for all downloads.")
+        self.file_progress = ttk.Progressbar(frame, orient='horizontal', length=400, mode='determinate')
+        self.file_progress.grid(row=8, column=0, columnspan=4, pady=(0, 10), sticky="ew")
+        self.add_tooltip(self.file_progress, "Progress for the current file being downloaded.")
 
         # Status Pane (ScrolledText)
         import tkinter.scrolledtext as st
         status_pane_label = ttk.Label(frame, text="Status Pane:")
-        status_pane_label.grid(row=7, column=0, sticky="w", pady=(10, 0))
+        status_pane_label.grid(row=9, column=0, sticky="w", pady=(10, 0))
+        self.add_tooltip(status_pane_label, "Shows log messages and status updates.")
         self.status_pane = st.ScrolledText(frame, height=10, width=100, state='disabled', wrap='word')
-        self.status_pane.grid(row=8, column=0, columnspan=4, sticky="nsew", pady=(0, 10))
+        self.status_pane.grid(row=10, column=0, columnspan=4, sticky="nsew", pady=(0, 10))
+        self.add_tooltip(self.status_pane, "Log and status output. Shows download progress, errors, and info.")
         self.status_pane_visible = True
 
-        # Status Bar
-        self.status_label = ttk.Label(frame, textvariable=self.status, foreground='blue', anchor='w')
-        self.status_label.grid(row=9, column=0, columnspan=4, sticky="ew", pady=(10, 0))
+        # Persistent Status Bar (bottom of window)
+        self.status_bar = ttk.Label(self.root, textvariable=self.status, relief=tk.SUNKEN, anchor='w', foreground='blue')
+        self.status_bar.grid(row=1, column=0, sticky='ew')
+        self.add_tooltip(self.status_bar, "Persistent status bar. Shows the latest status message.")
 
         # Quit Button (move to main frame for visibility)
         quit_btn = ttk.Button(frame, text="Quit", command=self.force_quit)
-        quit_btn.grid(row=10, column=0, sticky="w", pady=(10, 0))
+        quit_btn.grid(row=11, column=0, sticky="w", pady=(10, 0))
         self.add_tooltip(quit_btn, "Force quit the application immediately")
 
         # Dark Mode Toggle
         dark_btn = ttk.Button(frame, text="Toggle Dark Mode", command=self.toggle_dark_mode)
-        dark_btn.grid(row=10, column=3, sticky="e", pady=(10, 0))
+        dark_btn.grid(row=11, column=3, sticky="e", pady=(10, 0))
         self.add_tooltip(dark_btn, "Switch between light and dark mode")
 
         # Make widgets expand with window
         for i in range(4):
             frame.columnconfigure(i, weight=1)
-        for i in range(11):
+        for i in range(12):
             frame.rowconfigure(i, weight=0)
-        frame.rowconfigure(8, weight=1)
+        frame.rowconfigure(10, weight=1)
 
         # Store references for toggling log panel
         self._main_canvas = canvas
         self._main_frame = frame
         self._status_pane_label = status_pane_label
+
+        # Download history log viewer (ScrolledText)
+        import tkinter.scrolledtext as st
+        self.history_text = st.ScrolledText(history_tab, height=40, width=120, state='disabled', wrap='word')
+        self.history_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.add_tooltip(self.history_text, "View the download and error log history.")
+        refresh_btn = ttk.Button(history_tab, text="Refresh Log", command=self.refresh_history_log)
+        refresh_btn.pack(pady=5)
+        self.add_tooltip(refresh_btn, "Reload the log file contents.")
+        self.refresh_history_log()
+
+    def refresh_history_log(self):
+        """Refresh the download history log viewer tab."""
+        log_path = getattr(self, 'log_file', None)
+        if not log_path or not os.path.exists(log_path):
+            self.history_text.configure(state='normal')
+            self.history_text.delete('1.0', tk.END)
+            self.history_text.insert(tk.END, "No log file found or logging not started yet.")
+            self.history_text.configure(state='disabled')
+            return
+        try:
+            with open(log_path, 'r', encoding='utf-8') as f:
+                log_content = f.read()
+            self.history_text.configure(state='normal')
+            self.history_text.delete('1.0', tk.END)
+            self.history_text.insert(tk.END, log_content)
+            self.history_text.configure(state='disabled')
+        except Exception as e:
+            self.history_text.configure(state='normal')
+            self.history_text.delete('1.0', tk.END)
+            self.history_text.insert(tk.END, f"Failed to read log file: {e}")
+            self.history_text.configure(state='disabled')
+    def pause_downloads(self):
+        """Pause all downloads."""
+        if not self._is_paused:
+            self._pause_event.clear()
+            self._is_paused = True
+            self.status.set("Paused. Click Resume to continue.")
+            self.pause_btn.config(state='disabled')
+            self.resume_btn.config(state='normal')
+
+    def resume_downloads(self):
+        """Resume paused downloads."""
+        if self._is_paused:
+            self._pause_event.set()
+            self._is_paused = False
+            self.status.set("Resumed. Downloads continuing.")
+            self.pause_btn.config(state='normal')
+            self.resume_btn.config(state='disabled')
 
     def remove_url(self):
         selection = self.url_listbox.curselection()
@@ -852,8 +1076,15 @@ class DownloaderGUI:
         os._exit(0)
 
     def add_tooltip(self, widget, text):
-        # Simple tooltip implementation
+        # Improved tooltip implementation: always destroys on leave, never stacks
         def on_enter(event):
+            # Destroy any existing tooltip first
+            if hasattr(self, 'tooltip') and self.tooltip is not None:
+                try:
+                    self.tooltip.destroy()
+                except Exception:
+                    pass
+                self.tooltip = None
             self.tooltip = tk.Toplevel(widget)
             self.tooltip.wm_overrideredirect(True)
             x = widget.winfo_rootx() + 20
@@ -861,9 +1092,15 @@ class DownloaderGUI:
             self.tooltip.wm_geometry(f"+{x}+{y}")
             label = tk.Label(self.tooltip, text=text, background="#333", foreground="#fff", relief='solid', borderwidth=1, font=("Segoe UI", 9))
             label.pack(ipadx=4, ipady=2)
+
         def on_leave(event):
-            if hasattr(self, 'tooltip'):
-                self.tooltip.destroy()
+            if hasattr(self, 'tooltip') and self.tooltip is not None:
+                try:
+                    self.tooltip.destroy()
+                except Exception:
+                    pass
+                self.tooltip = None
+
         widget.bind("<Enter>", on_enter)
         widget.bind("<Leave>", on_leave)
 
@@ -959,17 +1196,44 @@ class DownloaderGUI:
     def start_download_thread(self):
         self.logger.debug("start_download_thread called.")
         # Start the download queue in a background thread
+        self._download_queue = None  # Will be set in process_download_queue
         threading.Thread(target=self.process_download_queue, daemon=True).start()
+
+    def add_url_dynamic(self, url):
+        """Add a URL to the download queue during download."""
+        if hasattr(self, '_download_queue') and self._download_queue is not None:
+            self._download_queue.put(url)
+            self.urls.append(url)
+            self.url_listbox.insert(tk.END, url)
+            self.logger.info(f"Dynamically added URL to queue: {url}")
+        else:
+            self.add_url()
+
+    def remove_url_dynamic(self, url):
+        """Remove a URL from the download queue during download."""
+        if url in self.urls:
+            self.urls.remove(url)
+            # Remove from listbox
+            idxs = [i for i, u in enumerate(self.url_listbox.get(0, tk.END)) if u == url]
+            for idx in reversed(idxs):
+                self.url_listbox.delete(idx)
+            self.logger.info(f"Dynamically removed URL: {url}")
+        # Note: If already in queue, it will be skipped in process_download_queue
 
     def process_download_queue(self):
         """
         Implements a download queue system. Each URL is queued and processed in order, with progress bar updates.
+        Allows dynamic add/remove of URLs during download. Skips duplicate files.
         """
         import queue
         self.thread_safe_status("Preparing download queue...")
         url_queue = queue.Queue()
+        seen_urls = set()
         for url in self.urls:
-            url_queue.put(url)
+            if url not in seen_urls:
+                url_queue.put(url)
+                seen_urls.add(url)
+        self._download_queue = url_queue
         base_dir = self.base_dir.get()
         os.makedirs(base_dir, exist_ok=True)
         self.setup_logger(base_dir)
@@ -978,6 +1242,7 @@ class DownloaderGUI:
         self.progress['value'] = 0
         self.logger.info(f"Download queue started. {total} URLs queued.")
         processed = 0
+        downloaded_files = set()
         try:
             from playwright.sync_api import sync_playwright
             with sync_playwright() as p:
@@ -985,7 +1250,14 @@ class DownloaderGUI:
                 context = browser.new_context()
                 page = context.new_page()
                 while not url_queue.empty():
+                    # Pause support
+                    while not self._pause_event.is_set():
+                        time.sleep(0.1)
                     url = url_queue.get()
+                    if url in seen_urls:
+                        # Already processed (from dynamic add)
+                        continue
+                    seen_urls.add(url)
                     self.thread_safe_status(f"Processing: {url}")
                     if url.startswith('https://drive.google.com/drive/folders/'):
                         credentials_path = self.config.get('credentials_path', None)
@@ -994,7 +1266,15 @@ class DownloaderGUI:
                         self.download_gdrive_with_fallback(url, gdrive_dir, credentials_path)
                     else:
                         self.logger.info(f"Visiting: {url}")
+                        # Check for duplicate files before download
                         s, t, a = self.download_files_threaded(page, url, base_dir, skipped_files=self.skipped_files, file_tree=self.file_tree)
+                        # Only add files that are not already downloaded
+                        for f in t.values():
+                            for file_path in f:
+                                if file_path in downloaded_files:
+                                    self.logger.info(f"Skipping duplicate file: {file_path}")
+                                else:
+                                    downloaded_files.add(file_path)
                         self.skipped_files.update(s or set())
                         self.file_tree.update(t or {})
                     url_queue.task_done()
@@ -1381,6 +1661,9 @@ class DownloaderGUI:
             max_retries = 3
             delay = 2
             for attempt in range(1, max_retries + 1):
+                # Pause support
+                while not self._pause_event.is_set():
+                    time.sleep(0.1)
                 try:
                     os.makedirs(os.path.dirname(local_path), exist_ok=True)
                     self.thread_safe_status(f"Downloading {abs_url} -> {local_path} (Attempt {attempt})")
@@ -1389,6 +1672,8 @@ class DownloaderGUI:
                         r.raise_for_status()
                         with open(local_path, 'wb') as f:
                             for chunk in r.iter_content(chunk_size=8192):
+                                while not self._pause_event.is_set():
+                                    time.sleep(0.1)
                                 if chunk:
                                     f.write(chunk)
                     self.logger.info(f"Downloaded: {abs_url}")
@@ -1489,6 +1774,13 @@ def main():
         root.iconbitmap("JosephThePlatypus.ico")
     except Exception as e:
         print(f"Warning: Could not set window icon: {e}")
+    # Install dependencies with progress dialog before launching main GUI
+    try:
+        install_dependencies_with_progress(root)
+    except Exception as dep_err:
+        messagebox.showerror("Startup Error", f"Failed to install dependencies: {dep_err}")
+        root.destroy()
+        return
     app = DownloaderGUI(root)
     root.mainloop()
 
