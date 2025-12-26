@@ -180,6 +180,35 @@ check_and_install("gdown")
 
 
 class DownloaderGUI:
+    def move_url_up(self):
+        selection = self.url_listbox.curselection()
+        if not selection or selection[0] == 0:
+            return
+        index = selection[0]
+        # Swap in self.urls
+        self.urls[index - 1], self.urls[index] = self.urls[index], self.urls[index - 1]
+        # Swap in Listbox
+        url_text = self.url_listbox.get(index)
+        self.url_listbox.delete(index)
+        self.url_listbox.insert(index - 1, url_text)
+        self.url_listbox.selection_clear(0, tk.END)
+        self.url_listbox.selection_set(index - 1)
+        self.url_listbox.activate(index - 1)
+
+    def move_url_down(self):
+        selection = self.url_listbox.curselection()
+        if not selection or selection[0] == self.url_listbox.size() - 1:
+            return
+        index = selection[0]
+        # Swap in self.urls
+        self.urls[index + 1], self.urls[index] = self.urls[index], self.urls[index + 1]
+        # Swap in Listbox
+        url_text = self.url_listbox.get(index)
+        self.url_listbox.delete(index)
+        self.url_listbox.insert(index + 1, url_text)
+        self.url_listbox.selection_clear(0, tk.END)
+        self.url_listbox.selection_set(index + 1)
+        self.url_listbox.activate(index + 1)
     def __init__(self, root):
         # Pause/resume event for downloads
         self._pause_event = threading.Event()
@@ -931,6 +960,15 @@ class DownloaderGUI:
         remove_url_btn = ttk.Button(frame, text="Remove URL", command=self.remove_url)
         remove_url_btn.grid(row=2, column=0, pady=(0, 10), sticky="ew")
         self.add_tooltip(remove_url_btn, "Remove the selected URL from the list")
+
+        # Move Up/Down Buttons for queue reordering
+        move_up_btn = ttk.Button(frame, text="Move Up", command=self.move_url_up)
+        move_up_btn.grid(row=2, column=1, pady=(0, 10), sticky="ew")
+        self.add_tooltip(move_up_btn, "Move the selected URL up in the queue")
+
+        move_down_btn = ttk.Button(frame, text="Move Down", command=self.move_url_down)
+        move_down_btn.grid(row=2, column=2, pady=(0, 10), sticky="ew")
+        self.add_tooltip(move_down_btn, "Move the selected URL down in the queue")
 
         # Download Folder Section
         dir_section = ttk.LabelFrame(frame, text="Download Folder", padding=(10, 10))
