@@ -11,8 +11,15 @@ import sys
 import urllib.parse
 import json
 import threading
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+try:
+    from tkinterdnd2 import TkinterDnD
+    import tkinter as tk
+    from tkinter import ttk, filedialog, messagebox
+    DND_AVAILABLE = True
+except ImportError:
+    import tkinter as tk
+    from tkinter import ttk, filedialog, messagebox
+    DND_AVAILABLE = False
 from datetime import datetime
 from pathlib import Path
 import requests
@@ -180,6 +187,28 @@ check_and_install("gdown")
 
 
 class DownloaderGUI:
+    def check_for_updates(self):
+        # Placeholder for update checking logic
+        messagebox.showinfo("Check for Updates", "Update checking is not yet implemented.")
+
+    def show_progress(self):
+        # Placeholder for menu action. Could focus or highlight the progress bar in the UI.
+        messagebox.showinfo("Progress", "The download progress bar is always visible in the main window.")
+
+    def toggle_log_panel(self):
+        # Show/hide the status pane and its label
+        if not hasattr(self, 'status_pane_visible'):
+            self.status_pane_visible = True
+        if self.status_pane_visible:
+            self.status_pane.grid_remove()
+            if hasattr(self, '_status_pane_label'):
+                self._status_pane_label.grid_remove()
+            self.status_pane_visible = False
+        else:
+            self.status_pane.grid()
+            if hasattr(self, '_status_pane_label'):
+                self._status_pane_label.grid()
+            self.status_pane_visible = True
     def move_url_up(self):
         selection = self.url_listbox.curselection()
         if not selection or selection[0] == 0:
@@ -215,7 +244,6 @@ class DownloaderGUI:
         self._pause_event.set()  # Not paused by default
         self._is_paused = False
         self.root = root
-        # Logger setup is handled by setup_logger below
         self.urls = [
             'https://www.justice.gov/epstein/foia',
             'https://www.justice.gov/epstein/court-records',
@@ -223,6 +251,7 @@ class DownloaderGUI:
             'https://www.justice.gov/epstein/doj-disclosures',
             'https://drive.google.com/drive/folders/1TrGxDGQLDLZu1vvvZDBAh-e7wN3y6Hoz?usp=sharing',
         ]
+        self.concurrent_downloads = tk.IntVar(value=6)
         self.base_dir = tk.StringVar(value=r'C:\Temp\Epstein')
         self.status = tk.StringVar(value="Ready.")
         self.skipped_files = set()
@@ -230,16 +259,41 @@ class DownloaderGUI:
         self.downloaded_json = tk.StringVar(value="")
         self.dark_mode = False
         self.scheduled = False
-        # Load config
+        # Config paths
         self.config_path = os.path.join(os.getcwd(), "config.json")
+        self.queue_state_path = os.path.join(os.getcwd(), "queue_state.json")
+        self.processed_count = 0
+        # Set up log_dir and logger early so restore_queue_state can use them
+        self.log_dir = os.path.join(os.getcwd(), "logs")
+        os.makedirs(self.log_dir, exist_ok=True)
+        self.error_log_path = os.path.join(self.log_dir, "error.log")
+        self.log_file = os.path.join(self.log_dir, f"epstein_downloader_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+        self.logger = logging.getLogger("EpsteinFilesDownloader")
+        self.logger.setLevel(logging.DEBUG)
+        if self.logger.hasHandlers():
+            self.logger.handlers.clear()
+        fh = logging.FileHandler(self.log_file, encoding='utf-8')
+        fh.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        fh.setFormatter(formatter)
+        self.logger.addHandler(fh)
+        sh = logging.StreamHandler()
+        sh.setLevel(logging.INFO)
+        sh.setFormatter(formatter)
+        self.logger.addHandler(sh)
+        # Now safe to load config and restore queue state
         self.config = self.load_config()
+        self.restore_queue_state()
         # Override defaults if config exists
         if self.config.get("download_dir"):
             self.base_dir = tk.StringVar(value=r'C:\Downloads\Epstein')
+        if self.config.get("concurrent_downloads"):
+            try:
+                self.concurrent_downloads.set(int(self.config["concurrent_downloads"]))
+            except Exception:
+                pass
         if self.config.get("log_dir"):
             self.log_dir = self.config["log_dir"]
-        else:
-            self.log_dir = os.path.join(os.getcwd(), "logs")
         if self.config.get("credentials_path"):
             self.credentials_path = self.config["credentials_path"]
         else:
@@ -252,6 +306,35 @@ class DownloaderGUI:
         self.create_widgets()
         # --- Drag and Drop Setup ---
         self.setup_drag_and_drop()
+        # Hook for saving queue state on close
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def save_queue_state(self):
+        try:
+            state = {
+                "urls": self.urls,
+                "processed_count": getattr(self, "processed_count", 0),
+            }
+            with open(self.queue_state_path, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=2)
+            self.logger.info("Queue state saved.")
+        except Exception as e:
+            self.logger.error(f"Failed to save queue state: {e}")
+
+    def restore_queue_state(self):
+        try:
+            if os.path.exists(self.queue_state_path):
+                with open(self.queue_state_path, "r", encoding="utf-8") as f:
+                    state = json.load(f)
+                self.urls = state.get("urls", self.urls)
+                self.processed_count = state.get("processed_count", 0)
+                self.logger.info("Queue state restored.")
+        except Exception as e:
+            self.logger.error(f"Failed to restore queue state: {e}")
+
+    def on_close(self):
+        self.save_queue_state()
+        self.root.destroy()
 
     def log_error(self, err: Exception, context: str = ""):  # Utility for error logging and dialog
         import traceback
@@ -353,6 +436,7 @@ class DownloaderGUI:
     def save_config(self):
         self.config["download_dir"] = self.base_dir.get()
         self.config["log_dir"] = getattr(self, "log_dir", os.path.join(os.getcwd(), "logs"))
+        self.config["concurrent_downloads"] = self.concurrent_downloads.get()
         # Save credentials_path if set
         if hasattr(self, "credentials_path") and self.credentials_path:
             self.config["credentials_path"] = self.credentials_path
@@ -456,39 +540,77 @@ class DownloaderGUI:
             except Exception as e:
                 self.log_error(e, "Import Settings")
 
+
     def open_settings_dialog(self):
-        """Open a dialog to view and edit key settings."""
+        """Open a dialog to view and edit all key settings."""
         win = tk.Toplevel(self.root)
         win.title("Settings")
-        win.geometry("500x300")
+        win.geometry("520x350")
+
+        # Download Folder
         ttk.Label(win, text="Download Folder:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
         download_var = tk.StringVar(value=self.base_dir.get())
         download_entry = ttk.Entry(win, textvariable=download_var, width=50)
         download_entry.grid(row=0, column=1, padx=10, pady=10)
+        browse_download_btn = ttk.Button(win, text="Browse", command=lambda: download_var.set(filedialog.askdirectory(title="Select Download Folder") or download_var.get()))
+        browse_download_btn.grid(row=0, column=2, padx=5)
+
+        # Log Folder
         ttk.Label(win, text="Log Folder:").grid(row=1, column=0, sticky="w", padx=10, pady=10)
         log_var = tk.StringVar(value=getattr(self, "log_dir", os.path.join(os.getcwd(), "logs")))
         log_entry = ttk.Entry(win, textvariable=log_var, width=50)
         log_entry.grid(row=1, column=1, padx=10, pady=10)
+        browse_log_btn = ttk.Button(win, text="Browse", command=lambda: log_var.set(filedialog.askdirectory(title="Select Log Folder") or log_var.get()))
+        browse_log_btn.grid(row=1, column=2, padx=5)
+
+        # Credentials File
         ttk.Label(win, text="Credentials File:").grid(row=2, column=0, sticky="w", padx=10, pady=10)
         cred_var = tk.StringVar(value=getattr(self, "credentials_path", ""))
         cred_entry = ttk.Entry(win, textvariable=cred_var, width=50)
         cred_entry.grid(row=2, column=1, padx=10, pady=10)
+        browse_cred_btn = ttk.Button(win, text="Browse", command=lambda: cred_var.set(filedialog.askopenfilename(title="Select credentials.json", filetypes=[("JSON files", "*.json"), ("All files", "*.*")]) or cred_var.get()))
+        browse_cred_btn.grid(row=2, column=2, padx=5)
+
+        # Concurrent Downloads
+        ttk.Label(win, text="Concurrent Downloads:").grid(row=3, column=0, sticky="w", padx=10, pady=10)
+        concurrency_var = tk.IntVar(value=self.concurrent_downloads.get())
+        concurrency_spin = ttk.Spinbox(win, from_=1, to=32, textvariable=concurrency_var, width=8, increment=1)
+        concurrency_spin.grid(row=3, column=1, sticky="w", padx=10, pady=10)
+
+        # Theme Selection
+        ttk.Label(win, text="Theme:").grid(row=4, column=0, sticky="w", padx=10, pady=10)
+        theme_var = tk.StringVar(value="Dark" if self.dark_mode else "Light")
+        theme_combo = ttk.Combobox(win, textvariable=theme_var, values=["Light", "Dark"], state="readonly", width=10)
+        theme_combo.grid(row=4, column=1, sticky="w", padx=10, pady=10)
 
         def save_and_close():
             self.base_dir.set(download_var.get())
             self.log_dir = log_var.get()
             os.makedirs(self.log_dir, exist_ok=True)
             self.credentials_path = cred_var.get() if cred_var.get() else None
+            self.concurrent_downloads.set(concurrency_var.get())
+            # Theme
+            new_dark = (theme_var.get() == "Dark")
+            if new_dark != self.dark_mode:
+                self.dark_mode = new_dark
+                self.set_theme('clam' if self.dark_mode else 'default')
             self.save_config()
             self.setup_logger(self.log_dir)
             win.destroy()
             messagebox.showinfo("Settings", "Settings updated.")
 
         save_btn = ttk.Button(win, text="Save", command=save_and_close)
-        save_btn.grid(row=3, column=0, columnspan=2, pady=20)
+        save_btn.grid(row=5, column=0, columnspan=3, pady=20)
+
+        # Tooltips
         self.add_tooltip(download_entry, "Edit the download folder path.")
+        self.add_tooltip(browse_download_btn, "Browse for download folder.")
         self.add_tooltip(log_entry, "Edit the log folder path.")
+        self.add_tooltip(browse_log_btn, "Browse for log folder.")
         self.add_tooltip(cred_entry, "Edit the path to credentials.json.")
+        self.add_tooltip(browse_cred_btn, "Browse for credentials.json file.")
+        self.add_tooltip(concurrency_spin, "Set the number of concurrent downloads (threads)")
+        self.add_tooltip(theme_combo, "Choose between light and dark mode.")
         self.add_tooltip(save_btn, "Save changes to settings.")
 
     def force_full_hash_rescan(self):
@@ -518,46 +640,39 @@ class DownloaderGUI:
             self.logger.info(f"Set credentials.json via File menu: {file_path}")
             messagebox.showinfo("Credentials Set", f"credentials.json set to: {file_path}")
 
-    def toggle_log_panel(self):
-        # Show/hide the status pane and its label
-        if not hasattr(self, 'status_pane_visible'):
-            self.status_pane_visible = True
-        if self.status_pane_visible:
-            self.status_pane.grid_remove()
-            if hasattr(self, '_status_pane_label'):
-                self._status_pane_label.grid_remove()
-            self.status_pane_visible = False
-        else:
-            self.status_pane.grid()
-            if hasattr(self, '_status_pane_label'):
-                self._status_pane_label.grid()
-            self.status_pane_visible = True
-
-    def show_progress(self):
-        # Placeholder: implement showing download progress
-        pass
-
-    def check_for_updates(self):
-        # Check for new commits or releases at the GitHub repository
-        import requests
-        repo_api_url = "https://api.github.com/repos/AresX0/WebsiteFileDownloader/commits"
+    def set_theme(self, theme_name):
+        style = ttk.Style()
         try:
-            response = requests.get(repo_api_url, timeout=10)
-            if response.status_code == 200:
-                commits = response.json()
-                if commits:
-                    latest_commit = commits[0]
-                    latest_sha = latest_commit.get('sha', '')
-                    latest_msg = latest_commit.get('commit', {}).get('message', '')
-                    # Optionally, compare with a local version/sha if tracked
-                    message = f"Latest commit SHA: {latest_sha[:7]}\nMessage: {latest_msg}\n\nSee all changes at:\nhttps://github.com/AresX0/WebsiteFileDownloader/commits/main"
-                    self.thread_safe_popup("Update Check", message)
-                else:
-                    self.thread_safe_popup("Update Check", "No commits found in the repository.")
-            else:
-                self.thread_safe_popup("Update Check", f"Failed to check updates. Status code: {response.status_code}")
-        except Exception as e:
-            self.thread_safe_popup("Update Check", f"Error checking for updates:\n{e}")
+            style.theme_use(theme_name)
+        except Exception:
+            style.theme_use('default')
+        # Optionally, tweak widget colors for extra clarity
+        if theme_name in ('clam', 'alt', 'vista', 'xpnative'):
+            style.configure('.', background='#222', foreground='#eee')
+            style.configure('TLabel', background='#222', foreground='#eee')
+            style.configure('TButton', background='#333', foreground='#eee')
+            style.configure('TEntry', fieldbackground='#333', foreground='#eee')
+            style.configure('TFrame', background='#222')
+            style.configure('TNotebook', background='#222')
+            style.configure('TNotebook.Tab', background='#333', foreground='#eee')
+            style.configure('TProgressbar', background='#444')
+        else:
+            style.configure('.', background='#f0f0f0', foreground='#222')
+            style.configure('TLabel', background='#f0f0f0', foreground='#222')
+            style.configure('TButton', background='#f0f0f0', foreground='#222')
+            style.configure('TEntry', fieldbackground='#fff', foreground='#222')
+            style.configure('TFrame', background='#f0f0f0')
+            style.configure('TNotebook', background='#f0f0f0')
+            style.configure('TNotebook.Tab', background='#e0e0e0', foreground='#222')
+            style.configure('TProgressbar', background='#e0e0e0')
+
+    def toggle_dark_mode(self):
+        self.dark_mode = not getattr(self, 'dark_mode', False)
+        # Use 'clam' for dark, 'default' for light if available
+        if self.dark_mode:
+            self.set_theme('clam')
+        else:
+            self.set_theme('default')
 
     def validate_credentials(self):
         # Placeholder: implement credentials validation
@@ -792,6 +907,7 @@ class DownloaderGUI:
                 all_files.update(sub_all or set())
 
         def download_file_task(abs_url, rel_path, local_path):
+            import time
             max_retries = 3
             delay = 2
             for attempt in range(1, max_retries + 1):
@@ -811,12 +927,40 @@ class DownloaderGUI:
                     self.logger.info(f"Downloading {abs_url} -> {local_path} (Attempt {attempt})")
                     with requests.get(abs_url, stream=True, timeout=300) as r:
                         r.raise_for_status()
+                        total_size = int(r.headers.get('content-length', 0))
+                        downloaded = 0
+                        start_time = time.time()
+                        last_update = start_time
+                        last_downloaded = 0
+                        eta = '--'
+                        speed = '--'
                         with open(local_path, 'wb') as f:
                             for chunk in r.iter_content(chunk_size=8192):
                                 while not self._pause_event.is_set():
                                     time.sleep(0.1)
                                 if chunk:
                                     f.write(chunk)
+                                    downloaded += len(chunk)
+                                    now = time.time()
+                                    elapsed = now - start_time
+                                    if elapsed > 0:
+                                        speed_val = downloaded / elapsed
+                                        speed = f"{speed_val/1024:.1f} KB/s"
+                                        if total_size > 0 and speed_val > 0:
+                                            eta_val = (total_size - downloaded) / speed_val
+                                            eta = f"{int(eta_val//60)}m {int(eta_val%60)}s"
+                                        else:
+                                            eta = '--'
+                                    # Update label every 0.5s or on finish
+                                    if now - last_update > 0.5 or downloaded == total_size:
+                                        def update_speed_eta(s=speed, e=eta):
+                                            self.speed_eta_var.set(f"Speed: {s}  ETA: {e}")
+                                        self.root.after(0, update_speed_eta)
+                                        last_update = now
+                        # Reset speed/eta label after file done
+                        def clear_speed_eta():
+                            self.speed_eta_var.set("Speed: --  ETA: --")
+                        self.root.after(0, clear_speed_eta)
                     self.logger.info(f"Downloaded: {abs_url}")
                     return
                 except Exception as e:
@@ -940,11 +1084,19 @@ class DownloaderGUI:
         # --- Main Downloader UI ---
         # Title
         title = ttk.Label(frame, text="Epstein Court Records Downloader", font=("Segoe UI", 20, "bold"))
-        title.grid(row=0, column=0, columnspan=4, pady=(0, 20), sticky="nsew")
+        title.grid(row=0, column=0, columnspan=4, pady=(0, 10), sticky="nsew")
 
-        # URLs Section
+        # Concurrent downloads setting UI (move to top for visibility)
+        concurrent_label = ttk.Label(frame, text="Concurrent Downloads:")
+        concurrent_label.grid(row=1, column=0, sticky="e", pady=(0, 10), padx=(0, 5))
+        concurrent_spin = ttk.Spinbox(frame, from_=1, to=32, textvariable=self.concurrent_downloads, width=5, increment=1)
+        concurrent_spin.grid(row=1, column=1, sticky="w", pady=(0, 10))
+        self.add_tooltip(concurrent_spin, "Set the number of concurrent downloads (threads)")
+        self.add_tooltip(concurrent_label, "Set the number of concurrent downloads (threads)")
+
+        # URLs Section (move to row 2)
         url_section = ttk.LabelFrame(frame, text="Download URLs", padding=(10, 10))
-        url_section.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(0, 10))
+        url_section.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(0, 10))
         url_section.columnconfigure(1, weight=1)
         self.url_listbox = tk.Listbox(url_section, height=5, width=80)
         self.url_listbox.grid(row=0, column=0, columnspan=3, sticky="ew")
@@ -957,22 +1109,23 @@ class DownloaderGUI:
         add_url_btn.grid(row=1, column=1, sticky="w", padx=(5, 0))
         self.add_tooltip(add_url_btn, "Add a new download URL")
         self.add_tooltip(self.url_entry, "Paste a new URL and click 'Add URL'")
+
         remove_url_btn = ttk.Button(frame, text="Remove URL", command=self.remove_url)
-        remove_url_btn.grid(row=2, column=0, pady=(0, 10), sticky="ew")
+        remove_url_btn.grid(row=3, column=0, pady=(0, 10), sticky="ew")
         self.add_tooltip(remove_url_btn, "Remove the selected URL from the list")
 
         # Move Up/Down Buttons for queue reordering
         move_up_btn = ttk.Button(frame, text="Move Up", command=self.move_url_up)
-        move_up_btn.grid(row=2, column=1, pady=(0, 10), sticky="ew")
+        move_up_btn.grid(row=3, column=1, pady=(0, 10), sticky="ew")
         self.add_tooltip(move_up_btn, "Move the selected URL up in the queue")
 
         move_down_btn = ttk.Button(frame, text="Move Down", command=self.move_url_down)
-        move_down_btn.grid(row=2, column=2, pady=(0, 10), sticky="ew")
+        move_down_btn.grid(row=3, column=2, pady=(0, 10), sticky="ew")
         self.add_tooltip(move_down_btn, "Move the selected URL down in the queue")
 
         # Download Folder Section
         dir_section = ttk.LabelFrame(frame, text="Download Folder", padding=(10, 10))
-        dir_section.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(0, 10))
+        dir_section.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(0, 10))
         dir_section.columnconfigure(1, weight=1)
         dir_entry = ttk.Entry(dir_section, textvariable=self.base_dir, width=60)
         dir_entry.grid(row=0, column=0, sticky="ew")
@@ -983,42 +1136,50 @@ class DownloaderGUI:
 
         # Action Buttons
         self.download_btn = ttk.Button(frame, text="Start Download", command=self.start_download_all_thread)
-        self.download_btn.grid(row=4, column=0, pady=10, sticky="ew")
+        self.download_btn.grid(row=5, column=0, pady=10, sticky="ew")
         self.add_tooltip(self.download_btn, "Start downloading all files from the URLs above (runs in background, UI stays responsive)")
         self.pause_btn = ttk.Button(frame, text="Pause", command=self.pause_downloads)
-        self.pause_btn.grid(row=4, column=1, pady=10, sticky="ew")
+        self.pause_btn.grid(row=5, column=1, pady=10, sticky="ew")
         self.add_tooltip(self.pause_btn, "Pause all downloads in progress.")
         self.resume_btn = ttk.Button(frame, text="Resume", command=self.resume_downloads, state='disabled')
-        self.resume_btn.grid(row=4, column=2, pady=10, sticky="ew")
+        self.resume_btn.grid(row=5, column=2, pady=10, sticky="ew")
         self.add_tooltip(self.resume_btn, "Resume paused downloads.")
         self.schedule_btn = ttk.Button(frame, text="Schedule Download", command=self.open_schedule_window)
-        self.schedule_btn.grid(row=4, column=3, pady=10, sticky="ew")
+        self.schedule_btn.grid(row=5, column=3, pady=10, sticky="ew")
         self.add_tooltip(self.schedule_btn, "Schedule downloads for specific days and times")
         self.json_btn = ttk.Button(frame, text="Show Downloaded JSON", command=self.show_json)
-        self.json_btn.grid(row=5, column=0, pady=10, sticky="ew")
+        self.json_btn.grid(row=6, column=0, pady=10, sticky="ew")
         self.add_tooltip(self.json_btn, "Show the JSON file of downloaded files")
         self.skipped_btn = ttk.Button(frame, text="Show Skipped Files", command=self.show_skipped)
-        self.skipped_btn.grid(row=5, column=1, pady=10, sticky="ew")
+        self.skipped_btn.grid(row=6, column=1, pady=10, sticky="ew")
         self.add_tooltip(self.skipped_btn, "Show files that were skipped (already exist or duplicate)")
 
         # Progress Section
         progress_label = ttk.Label(frame, text="Progress:")
-        progress_label.grid(row=6, column=0, sticky="w", pady=(10, 0))
+        progress_label.grid(row=7, column=0, sticky="w", pady=(10, 0))
         self.add_tooltip(progress_label, "Shows the overall download progress.")
         self.progress = ttk.Progressbar(frame, orient='horizontal', length=400, mode='determinate')
-        self.progress.grid(row=7, column=0, columnspan=4, pady=(0, 10), sticky="ew")
+        self.progress.grid(row=8, column=0, columnspan=4, pady=(0, 10), sticky="ew")
         self.add_tooltip(self.progress, "Overall progress for all downloads.")
+
         self.file_progress = ttk.Progressbar(frame, orient='horizontal', length=400, mode='determinate')
-        self.file_progress.grid(row=8, column=0, columnspan=4, pady=(0, 10), sticky="ew")
+        self.file_progress.grid(row=9, column=0, columnspan=4, pady=(0, 10), sticky="ew")
         self.add_tooltip(self.file_progress, "Progress for the current file being downloaded.")
+
+
+        # Download speed and ETA label (move to its own row above status pane)
+        self.speed_eta_var = tk.StringVar(value="Speed: -- ETA: --")
+        self.speed_eta_label = ttk.Label(frame, textvariable=self.speed_eta_var)
+        self.speed_eta_label.grid(row=10, column=0, columnspan=4, sticky="w", pady=(0, 10))
+        self.add_tooltip(self.speed_eta_label, "Shows current download speed and estimated time remaining for the current file.")
 
         # Status Pane (ScrolledText)
         import tkinter.scrolledtext as st
         status_pane_label = ttk.Label(frame, text="Status Pane:")
-        status_pane_label.grid(row=9, column=0, sticky="w", pady=(10, 0))
+        status_pane_label.grid(row=11, column=0, sticky="w", pady=(10, 0))
         self.add_tooltip(status_pane_label, "Shows log messages and status updates.")
         self.status_pane = st.ScrolledText(frame, height=10, width=100, state='disabled', wrap='word')
-        self.status_pane.grid(row=10, column=0, columnspan=4, sticky="nsew", pady=(0, 10))
+        self.status_pane.grid(row=12, column=0, columnspan=4, sticky="nsew", pady=(0, 10))
         self.add_tooltip(self.status_pane, "Log and status output. Shows download progress, errors, and info.")
         self.status_pane_visible = True
 
@@ -1029,20 +1190,20 @@ class DownloaderGUI:
 
         # Quit Button (move to main frame for visibility)
         quit_btn = ttk.Button(frame, text="Quit", command=self.force_quit)
-        quit_btn.grid(row=11, column=0, sticky="w", pady=(10, 0))
+        quit_btn.grid(row=13, column=0, sticky="w", pady=(10, 0))
         self.add_tooltip(quit_btn, "Force quit the application immediately")
 
         # Dark Mode Toggle
         dark_btn = ttk.Button(frame, text="Toggle Dark Mode", command=self.toggle_dark_mode)
-        dark_btn.grid(row=11, column=3, sticky="e", pady=(10, 0))
+        dark_btn.grid(row=13, column=3, sticky="e", pady=(10, 0))
         self.add_tooltip(dark_btn, "Switch between light and dark mode")
 
         # Make widgets expand with window
         for i in range(4):
             frame.columnconfigure(i, weight=1)
-        for i in range(12):
+        for i in range(14):
             frame.rowconfigure(i, weight=0)
-        frame.rowconfigure(10, weight=1)
+        frame.rowconfigure(12, weight=1)
 
         # Store references for toggling log panel
         self._main_canvas = canvas
@@ -1276,7 +1437,7 @@ class DownloaderGUI:
         self.progress['maximum'] = total
         self.progress['value'] = 0
         self.logger.info(f"Download queue started. {total} URLs queued.")
-        processed = 0
+        processed = getattr(self, "processed_count", 0)
         downloaded_files = set()
         try:
             from playwright.sync_api import sync_playwright
@@ -1314,8 +1475,10 @@ class DownloaderGUI:
                         self.file_tree.update(t or {})
                     url_queue.task_done()
                     processed += 1
+                    self.processed_count = processed
                     self.progress['value'] = processed
                     self.root.update_idletasks()
+                    self.save_queue_state()
                 browser.close()
         except Exception as e:
             self.logger.error(f"Exception in download queue: {e}", exc_info=True)
@@ -1722,9 +1885,9 @@ class DownloaderGUI:
                         self.logger.error(f"Permanently failed to download {abs_url} after {max_retries} attempts.")
                         return local_path
 
-        # Multithreaded download (up to 6 at a time)
+        # Multithreaded download (user-configurable concurrency)
         failed_downloads = []
-        with ThreadPoolExecutor(max_workers=6) as executor:
+        with ThreadPoolExecutor(max_workers=self.concurrent_downloads.get()) as executor:
             future_to_info = {executor.submit(download_file, abs_url, local_path): (abs_url, local_path) for abs_url, local_path, _ in download_info}
             for future in as_completed(future_to_info):
                 abs_url, local_path = future_to_info[future]
@@ -1803,7 +1966,10 @@ class DownloaderGUI:
                 download_file(service, f['id'], f['name'], gdrive_dir)
 
 def main():
-    root = tk.Tk()
+    if DND_AVAILABLE:
+        root = TkinterDnD.Tk()
+    else:
+        root = tk.Tk()
     root.title("EpsteinFilesDownloader")
     try:
         root.iconbitmap("JosephThePlatypus.ico")
