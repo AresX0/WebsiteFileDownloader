@@ -242,31 +242,19 @@ class DownloaderGUI:
     def setup_drag_and_drop(self):
         # Try to import tkinterDnD2 for drag-and-drop support
         try:
-            from tkinterdnd2 import DND_FILES, TkinterDnD
+            from tkinterdnd2 import DND_FILES
         except ImportError:
             self.logger.warning("tkinterDnD2 not installed. Drag-and-drop will not be available.")
             return
-
-        # Re-wrap root window for DnD
-        if not hasattr(self.root, '_dnd_wrapped'):
+        # Only set up DnD for the URL listbox if it exists
+        if hasattr(self, 'url_listbox'):
             try:
-                old_root = self.root
-                self.root = TkinterDnD.Tk()  # Re-wrap as DnD window
-                self.root._dnd_wrapped = True
-                # Re-create menu bar after root replacement
-                self.create_menu()
-                # Re-create widgets if needed
-                if hasattr(self, 'create_widgets'):
-                    self.create_widgets()
-                # Transfer geometry and title
-                try:
-                    self.root.geometry(old_root.geometry())
-                    self.root.title(old_root.title())
-                except Exception:
-                    pass
+                self.url_listbox.drop_target_register(DND_FILES)
+                self.url_listbox.dnd_bind('<<Drop>>', self.on_url_drop)
+                self.url_listbox.dnd_bind('<<DragEnter>>', lambda e: self.url_listbox.config(bg="#cce6ff"))
+                self.url_listbox.dnd_bind('<<DragLeave>>', lambda e: self.url_listbox.config(bg="white"))
             except Exception as e:
-                self.logger.warning(f"Failed to enable drag-and-drop: {e}")
-                return
+                self.logger.warning(f"Failed to enable DnD on URL listbox: {e}")
 
         # Always ensure menu bar is present after any DnD setup
         self.create_menu()
@@ -851,17 +839,26 @@ class DownloaderGUI:
         self.logger.info("Logger initialized.")
 
     def thread_safe_status(self, msg):
-        # Schedule status update on the main thread
-        self.root.after(0, self.status.set, msg)
-        self.append_status_pane(msg)
+        # Schedule status update on the main thread, safe for closed mainloop
+        try:
+            self.root.after(0, self.status.set, msg)
+            self.append_status_pane(msg)
+        except RuntimeError:
+            pass
 
     def append_status_pane(self, msg):
         def append():
-            self.status_pane.configure(state='normal')
-            self.status_pane.insert('end', msg + '\n')
-            self.status_pane.see('end')
-            self.status_pane.configure(state='disabled')
-        self.root.after(0, append)
+            try:
+                self.status_pane.configure(state='normal')
+                self.status_pane.insert('end', msg + '\n')
+                self.status_pane.see('end')
+                self.status_pane.configure(state='disabled')
+            except RuntimeError:
+                pass
+        try:
+            self.root.after(0, append)
+        except RuntimeError:
+            pass
 
     def create_widgets(self):
         # Make window scalable
