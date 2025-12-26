@@ -1372,7 +1372,7 @@ class DownloaderGUI:
         self.history_filter_var = tk.StringVar()
         filter_entry = ttk.Entry(filter_frame, textvariable=self.history_filter_var, width=40, font=("Segoe UI", 11))
         filter_entry.pack(side='left', padx=(5, 0))
-        filter_entry.bind('<KeyRelease>', lambda e: self.refresh_history_log())
+        filter_entry.bind('<KeyRelease>', lambda e: self.filter_history_log())
         refresh_btn = ttk.Button(filter_frame, text="Refresh", command=self.refresh_history_log)
         refresh_btn.pack(side='left', padx=(10, 0))
 
@@ -1381,7 +1381,33 @@ class DownloaderGUI:
         self.history_text = st.ScrolledText(self.history_tab, height=40, width=120, state='disabled', wrap='word', font=("Segoe UI", 11))
         self.history_text.grid(row=1, column=0, sticky='nsew', padx=10, pady=10)
         self.add_tooltip(self.history_text, "View the download and error log history.")
+        self._history_log_lines = []  # Store all log lines for filtering
         self.refresh_history_log()
+
+    def refresh_history_log(self):
+        """Load the log file and display all lines, updating the filter cache."""
+        log_path = self.log_file if hasattr(self, 'log_file') else os.path.join(os.getcwd(), 'logs', 'epstein_downloader.log')
+        try:
+            with open(log_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+        except Exception:
+            lines = []
+        self._history_log_lines = lines
+        self.filter_history_log()
+
+    def filter_history_log(self):
+        """Display only log lines matching the filter entry."""
+        filter_text = self.history_filter_var.get().strip().lower()
+        self.history_text.config(state='normal')
+        self.history_text.delete('1.0', tk.END)
+        if not filter_text:
+            for line in self._history_log_lines:
+                self.history_text.insert(tk.END, line)
+        else:
+            for line in self._history_log_lines:
+                if filter_text in line.lower():
+                    self.history_text.insert(tk.END, line)
+        self.history_text.config(state='disabled')
 
         # --- Main Downloader UI ---
 
