@@ -1,3 +1,4 @@
+
 # EpsteinFilesDownloader v1.0.0
 # (C) 2025 - Refactored for clarity, maintainability, and efficiency
 
@@ -81,42 +82,6 @@ def install_dependencies_with_progress(root=None):
                 if root:
                     messagebox.showerror("Dependency Error", f"Failed to install {pip_name}: {e}")
                 raise
-    ensure_pip()
-    for pkg in ("playwright", "requests", "gdown", "google-api-python-client", "google-auth", "google-auth-httplib2"):
-        check_and_install(pkg)
-    def ensure_playwright_browsers():
-        try:
-            from playwright.sync_api import sync_playwright
-            with sync_playwright() as p:
-                try:
-                    p.chromium.launch(headless=True).close()
-                except Exception:
-                    show_progress("Installing Playwright browsers...")
-                    subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium"])
-        except Exception as e:
-            close_progress()
-            if root:
-                messagebox.showerror("Playwright Error", f"Error ensuring Playwright browsers: {e}")
-            raise
-    ensure_playwright_browsers()
-    close_progress()
-
-
-# --- DownloaderGUI Class ---
-
-import os
-import re
-import urllib.parse
-import json
-import threading
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
-from datetime import datetime
-from pathlib import Path
-from playwright.sync_api import sync_playwright
-import requests
-import sched
-import time
 import importlib.util
 import subprocess
 import glob
@@ -187,63 +152,104 @@ check_and_install("gdown")
 
 
 class DownloaderGUI:
-    def show_error_dialog(self, message, title="Error"):
-        """Show a detailed error dialog and log the error."""
-        import tkinter
-        try:
-            messagebox.showerror(title, message)
-        except tkinter.TclError:
-            # Fallback for headless or non-GUI environments
-            self.logger.error(f"[Dialog Suppressed] {title}: {message}")
-
-
-    def check_for_updates(self):
-        # Non-blocking update check (example: check GitHub releases or a version file)
+    def __init__(self, root):
+        self.root = root
+        self.dark_mode = False
+        self.base_dir = tk.StringVar(value=r'C:\Downloads\Epstein')
+        self.log_dir = os.path.join(os.getcwd(), "logs")
+        self.credentials_path = None
+        self.concurrent_downloads = tk.IntVar(value=3)
+        self.urls = []
+        self.default_urls = [
+            "https://a.com",
+            "https://b.com"
+        ]
+        self.queue_state_path = os.path.join(os.getcwd(), "queue_state.json")
+        self.config_path = os.path.join(os.getcwd(), "config.json")
+        self.status = tk.StringVar(value="Ready")
+        self.speed_eta_var = tk.StringVar(value="Speed: --  ETA: --")
+        self.error_log_path = os.path.join(self.log_dir, "error.log")
+        self.log_file = os.path.join(self.log_dir, f"epstein_downloader_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
         import threading
-        def do_check():
+        self._pause_event = threading.Event()
+        self._is_paused = False
+        self.downloaded_json = tk.StringVar(value="")
+        self.logger = logging.getLogger("EpsteinFilesDownloader")
+        self.logger.setLevel(logging.DEBUG)
+        if self.logger.hasHandlers():
+            self.logger.handlers.clear()
+        fh = logging.FileHandler(self.log_file, encoding='utf-8')
+        fh.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        fh.setFormatter(formatter)
+        self.logger.addHandler(fh)
+        sh = logging.StreamHandler()
+        sh.setLevel(logging.INFO)
+        sh.setFormatter(formatter)
+        self.logger.addHandler(sh)
+        class StatusPaneHandler(logging.Handler):
+            def __init__(self, gui):
+                super().__init__()
+                self.gui = gui
+            def emit(self, record):
+                msg = self.format(record)
+                self.gui.append_status_pane(msg)
+        status_handler = StatusPaneHandler(self)
+        status_handler.setLevel(logging.INFO)
+        status_handler.setFormatter(formatter)
+        self.logger.addHandler(status_handler)
+        self.logger.info("Logger initialized.")
+        # Now safe to load config and restore queue state
+        self.config = self.load_config() if hasattr(self, 'load_config') else {}
+        # Option for gdown fallback (must be after self.config is loaded)
+        self.use_gdown_fallback = tk.BooleanVar(value=self.config.get("use_gdown_fallback", False))
+        self.restore_queue_state() if hasattr(self, 'restore_queue_state') else None
+        # Override defaults if config exists
+        if self.config.get("download_dir"):
+            self.base_dir.set(self.config["download_dir"])
+        if self.config.get("concurrent_downloads"):
             try:
-                import requests
-                url = "https://raw.githubusercontent.com/JosephThePlatypus/EpsteinFilesDownloader/main/VERSION.txt"
-                r = requests.get(url, timeout=10)
-                if r.status_code == 200:
-                    latest = r.text.strip()
-                    if latest != __version__:
-                        self.root.after(0, lambda: messagebox.showinfo("Update Available", f"A new version is available: {latest}\nYou are running: {__version__}"))
-                    else:
-                        self.root.after(0, lambda: messagebox.showinfo("Up to Date", f"You are running the latest version: {__version__}"))
-                else:
-                    self.root.after(0, lambda: messagebox.showwarning("Update Check Failed", "Could not check for updates."))
-            except Exception as e:
-                self.root.after(0, lambda: messagebox.showwarning("Update Check Error", f"Error checking for updates: {e}"))
-        threading.Thread(target=do_check, daemon=True).start()
-
-
-    def show_progress(self):
-        # Focus/highlight the progress bar in the UI (non-blocking)
-        try:
-            self.progress.grid()
-            self.progress.focus_set()
-            self.progress.configure(style="green.Horizontal.TProgressbar")
-            style = ttk.Style()
-            style.configure("green.Horizontal.TProgressbar", foreground='green', background='green')
-            self.root.after(2000, lambda: self.progress.configure(style="TProgressbar"))
-        except Exception:
-            pass
-
-    def toggle_log_panel(self):
-        # Show/hide the status pane and its label
-        if not hasattr(self, 'status_pane_visible'):
-            self.status_pane_visible = True
-        if self.status_pane_visible:
-            self.status_pane.grid_remove()
-            if hasattr(self, '_status_pane_label'):
-                self._status_pane_label.grid_remove()
-            self.status_pane_visible = False
+                self.concurrent_downloads.set(int(self.config["concurrent_downloads"]))
+            except Exception:
+                pass
+        if self.config.get("log_dir"):
+            self.log_dir = self.config["log_dir"]
+        if self.config.get("credentials_path"):
+            self.credentials_path = self.config["credentials_path"]
         else:
-            self.status_pane.grid()
-            if hasattr(self, '_status_pane_label'):
-                self._status_pane_label.grid()
-            self.status_pane_visible = True
+            self.credentials_path = None
+        os.makedirs(self.log_dir, exist_ok=True)
+        self.error_log_path = os.path.join(self.log_dir, "error.log")
+        self.setup_logger(self.log_dir) if hasattr(self, 'setup_logger') else None
+        self.logger.debug(f"EpsteinFilesDownloader v{__version__} started. Log file: {self.log_file}")
+        self.create_menu() if hasattr(self, 'create_menu') else None
+        self.create_widgets() if hasattr(self, 'create_widgets') else None
+        self.create_log_panel()
+        self.setup_drag_and_drop() if hasattr(self, 'setup_drag_and_drop') else None
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close) if hasattr(self, 'on_close') else None
+
+    def open_selected_url_in_browser(self):
+        selection = self.url_listbox.curselection()
+        if not selection:
+            return
+        url = self.url_listbox.get(selection[0])
+        import webbrowser
+        try:
+            webbrowser.open(url)
+        except Exception as e:
+            self.logger.warning(f"Failed to open URL in browser: {e}")
+
+    def copy_selected_url(self):
+        selection = self.url_listbox.curselection()
+        if not selection:
+            return
+        url = self.url_listbox.get(selection[0])
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(url)
+            self.root.update()  # Keeps clipboard after window closes
+        except Exception as e:
+            self.logger.warning(f"Failed to copy URL to clipboard: {e}")
 
     def move_url_up(self):
         selection = self.url_listbox.curselection()
@@ -275,40 +281,81 @@ class DownloaderGUI:
         self.url_listbox.selection_set(index + 1)
         self.url_listbox.activate(index + 1)
 
-    def __init__(self, root):
-        # Pause/resume event for downloads
-        self._pause_event = threading.Event()
-        self._pause_event.set()  # Not paused by default
-        self._is_paused = False
-        self.root = root
-        self.default_urls = [
-            'https://www.justice.gov/epstein/foia',
-            'https://www.justice.gov/epstein/court-records',
-            'https://oversight.house.gov/release/oversight-committee-releases-epstein-records-provided-by-the-department-of-justice/',
-            'https://www.justice.gov/epstein/doj-disclosures',
-            'https://drive.google.com/drive/folders/1TrGxDGQLDLZu1vvvZDBAh-e7wN3y6Hoz?usp=sharing',
-        ]
-        self.urls = list(self.default_urls)
-        self.concurrent_downloads = tk.IntVar(value=6)
-        self.base_dir = tk.StringVar(value=r'C:\Temp\Epstein')
-        self.status = tk.StringVar(value="Ready.")
-        self.skipped_files = set()
-        self.file_tree = {}
-        self.downloaded_json = tk.StringVar(value="")
-        self.dark_mode = False
-        self.scheduled = False
-        # Config paths
-        self.config_path = os.path.join(os.getcwd(), "config.json")
-        self.queue_state_path = os.path.join(os.getcwd(), "queue_state.json")
-        self.processed_count = 0
-        # Set up log_dir and logger early so restore_queue_state can use them
-        self.log_dir = os.path.join(os.getcwd(), "logs")
-        os.makedirs(self.log_dir, exist_ok=True)
-        self.error_log_path = os.path.join(self.log_dir, "error.log")
-        self.log_file = os.path.join(self.log_dir, f"epstein_downloader_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
-        self.logger = logging.getLogger("EpsteinFilesDownloader")
-        self.logger.setLevel(logging.DEBUG)
-        if self.logger.hasHandlers():
+    def check_for_updates(self):
+        # Non-blocking update check (example: check GitHub releases or a version file)
+        import threading
+        def do_check():
+            try:
+                import requests
+                url = "https://raw.githubusercontent.com/JosephThePlatypus/EpsteinFilesDownloader/main/VERSION.txt"
+                r = requests.get(url, timeout=10)
+                if r.status_code == 200:
+                    latest = r.text.strip()
+                    if latest != __version__:
+                        self.root.after(0, lambda: messagebox.showinfo("Update Available", f"A new version is available: {latest}\nYou are running: {__version__}"))
+                    else:
+                        self.root.after(0, lambda: messagebox.showinfo("Up to Date", f"You are running the latest version: {__version__}"))
+                else:
+                    self.root.after(0, lambda: messagebox.showwarning("Update Check Failed", "Could not check for updates."))
+            except Exception as e:
+                self.root.after(0, lambda: messagebox.showwarning("Update Check Error", f"Error checking for updates: {e}"))
+        threading.Thread(target=do_check, daemon=True).start()
+
+    def show_progress(self):
+        # Placeholder: show a messagebox or popup. You can expand this to show a real progress dialog.
+        messagebox.showinfo("Download Progress", "Download progress is shown in the main window's progress bars.")
+
+    def create_log_panel(self):
+        import tkinter.scrolledtext as st
+        if not hasattr(self, 'log_panel'):
+            self.log_panel = st.ScrolledText(self.root, height=8, state='disabled', font=('Consolas', 10))
+            # Use grid instead of pack to avoid geometry manager conflict
+            self.log_panel.grid(row=99, column=0, columnspan=4, sticky='ew', padx=4, pady=2)
+            self.log_panel_visible = True
+        else:
+            if not self.log_panel.winfo_ismapped():
+                self.log_panel.grid(row=99, column=0, columnspan=4, sticky='ew', padx=4, pady=2)
+                self.log_panel_visible = True
+
+    def toggle_log_panel(self):
+        if hasattr(self, 'log_panel'):
+            if self.log_panel.winfo_ismapped():
+                self.log_panel.grid_remove()
+                self.log_panel_visible = False
+            else:
+                self.log_panel.grid(row=99, column=0, columnspan=4, sticky='ew', padx=4, pady=2)
+                self.log_panel_visible = True
+        else:
+            self.create_log_panel()
+
+    def append_log_panel(self, msg):
+        if hasattr(self, 'log_panel'):
+            self.log_panel.configure(state='normal')
+            self.log_panel.insert('end', msg + '\n')
+            self.log_panel.see('end')
+            self.log_panel.configure(state='disabled')
+
+    def setup_url_listbox_context_menu(self):
+        # Context menu for URL listbox
+        self.url_menu = tk.Menu(self.url_listbox, tearoff=0)
+        self.url_menu.add_command(label="Remove URL", command=self.remove_url)
+        self.url_menu.add_command(label="Move Up", command=self.move_url_up)
+        self.url_menu.add_command(label="Move Down", command=self.move_url_down)
+        self.url_menu.add_separator()
+        self.url_menu.add_command(label="Copy URL", command=self.copy_selected_url)
+        self.url_menu.add_command(label="Open in Browser", command=self.open_selected_url_in_browser)
+        self.url_listbox.bind("<Button-3>", self.show_url_context_menu)
+
+    def show_url_context_menu(self, event):
+        try:
+            # Select the item under the mouse
+            index = self.url_listbox.nearest(event.y)
+            self.url_listbox.selection_clear(0, tk.END)
+            self.url_listbox.selection_set(index)
+            self.url_listbox.activate(index)
+            self.url_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.url_menu.grab_release()
             self.logger.handlers.clear()
         fh = logging.FileHandler(self.log_file, encoding='utf-8')
         fh.setLevel(logging.DEBUG)
@@ -623,58 +670,71 @@ class DownloaderGUI:
 
 
     def open_settings_dialog(self):
-        """Open a dialog to view and edit all key settings, including proxy and speed limit."""
+        """Open a dialog to view and edit all key settings, grouped in tabs."""
         win = tk.Toplevel(self.root)
         win.title("Settings")
-        win.geometry("600x420")
+        win.geometry("650x480")
 
-        # Download Folder
-        ttk.Label(win, text="Download Folder:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
+        notebook = ttk.Notebook(win)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+
+        # --- General Tab ---
+        general_tab = ttk.Frame(notebook)
+        notebook.add(general_tab, text="General")
+        ttk.Label(general_tab, text="Download Folder:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
         download_var = tk.StringVar(value=self.base_dir.get())
-        download_entry = ttk.Entry(win, textvariable=download_var, width=50)
+        download_entry = ttk.Entry(general_tab, textvariable=download_var, width=50)
         download_entry.grid(row=0, column=1, padx=10, pady=10)
-        browse_download_btn = ttk.Button(win, text="Browse", command=lambda: download_var.set(filedialog.askdirectory(title="Select Download Folder") or download_var.get()))
+        browse_download_btn = ttk.Button(general_tab, text="Browse", command=lambda: download_var.set(filedialog.askdirectory(title="Select Download Folder") or download_var.get()))
         browse_download_btn.grid(row=0, column=2, padx=5)
-
-        # Log Folder
-        ttk.Label(win, text="Log Folder:").grid(row=1, column=0, sticky="w", padx=10, pady=10)
+        ttk.Label(general_tab, text="Log Folder:").grid(row=1, column=0, sticky="w", padx=10, pady=10)
         log_var = tk.StringVar(value=getattr(self, "log_dir", os.path.join(os.getcwd(), "logs")))
-        log_entry = ttk.Entry(win, textvariable=log_var, width=50)
+        log_entry = ttk.Entry(general_tab, textvariable=log_var, width=50)
         log_entry.grid(row=1, column=1, padx=10, pady=10)
-        browse_log_btn = ttk.Button(win, text="Browse", command=lambda: log_var.set(filedialog.askdirectory(title="Select Log Folder") or log_var.get()))
+        browse_log_btn = ttk.Button(general_tab, text="Browse", command=lambda: log_var.set(filedialog.askdirectory(title="Select Log Folder") or log_var.get()))
         browse_log_btn.grid(row=1, column=2, padx=5)
-
-        # Credentials File
-        ttk.Label(win, text="Credentials File:").grid(row=2, column=0, sticky="w", padx=10, pady=10)
+        ttk.Label(general_tab, text="Credentials File:").grid(row=2, column=0, sticky="w", padx=10, pady=10)
         cred_var = tk.StringVar(value=getattr(self, "credentials_path", ""))
-        cred_entry = ttk.Entry(win, textvariable=cred_var, width=50)
+        cred_entry = ttk.Entry(general_tab, textvariable=cred_var, width=50)
         cred_entry.grid(row=2, column=1, padx=10, pady=10)
-        browse_cred_btn = ttk.Button(win, text="Browse", command=lambda: cred_var.set(filedialog.askopenfilename(title="Select credentials.json", filetypes=[("JSON files", "*.json"), ("All files", "*.*")]) or cred_var.get()))
+        browse_cred_btn = ttk.Button(general_tab, text="Browse", command=lambda: cred_var.set(filedialog.askopenfilename(title="Select credentials.json", filetypes=[("JSON files", "*.json"), ("All files", "*.*")]) or cred_var.get()))
         browse_cred_btn.grid(row=2, column=2, padx=5)
-
-        # Concurrent Downloads
-        ttk.Label(win, text="Concurrent Downloads:").grid(row=3, column=0, sticky="w", padx=10, pady=10)
+        ttk.Label(general_tab, text="Concurrent Downloads:").grid(row=3, column=0, sticky="w", padx=10, pady=10)
         concurrency_var = tk.IntVar(value=self.concurrent_downloads.get())
-        concurrency_spin = ttk.Spinbox(win, from_=1, to=32, textvariable=concurrency_var, width=8, increment=1)
+        concurrency_spin = ttk.Spinbox(general_tab, from_=1, to=32, textvariable=concurrency_var, width=8, increment=1)
         concurrency_spin.grid(row=3, column=1, sticky="w", padx=10, pady=10)
 
-        # Proxy Settings
-        ttk.Label(win, text="Proxy (http[s]://user:pass@host:port or leave blank):").grid(row=4, column=0, sticky="w", padx=10, pady=10)
+        # --- Network Tab ---
+        network_tab = ttk.Frame(notebook)
+        notebook.add(network_tab, text="Network")
+        ttk.Label(network_tab, text="Proxy (http[s]://user:pass@host:port or leave blank):").grid(row=0, column=0, sticky="w", padx=10, pady=10)
         proxy_var = tk.StringVar(value=self.config.get("proxy", ""))
-        proxy_entry = ttk.Entry(win, textvariable=proxy_var, width=50)
-        proxy_entry.grid(row=4, column=1, padx=10, pady=10, columnspan=2)
-
-        # Speed Throttle
-        ttk.Label(win, text="Download Speed Limit (KB/s, 0 = unlimited):").grid(row=5, column=0, sticky="w", padx=10, pady=10)
+        proxy_entry = ttk.Entry(network_tab, textvariable=proxy_var, width=50)
+        proxy_entry.grid(row=0, column=1, padx=10, pady=10, columnspan=2)
+        ttk.Label(network_tab, text="Download Speed Limit (KB/s, 0 = unlimited):").grid(row=1, column=0, sticky="w", padx=10, pady=10)
         speed_var = tk.IntVar(value=int(self.config.get("speed_limit_kbps", 0)))
-        speed_spin = ttk.Spinbox(win, from_=0, to=102400, textvariable=speed_var, width=10, increment=10)
-        speed_spin.grid(row=5, column=1, sticky="w", padx=10, pady=10)
+        speed_spin = ttk.Spinbox(network_tab, from_=0, to=102400, textvariable=speed_var, width=10, increment=10)
+        speed_spin.grid(row=1, column=1, sticky="w", padx=10, pady=10)
 
-        # Theme Selection
-        ttk.Label(win, text="Theme:").grid(row=6, column=0, sticky="w", padx=10, pady=10)
+        # --- Appearance Tab ---
+        appearance_tab = ttk.Frame(notebook)
+        notebook.add(appearance_tab, text="Appearance")
+        ttk.Label(appearance_tab, text="Theme:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
         theme_var = tk.StringVar(value="Dark" if self.dark_mode else "Light")
-        theme_combo = ttk.Combobox(win, textvariable=theme_var, values=["Light", "Dark"], state="readonly", width=10)
-        theme_combo.grid(row=6, column=1, sticky="w", padx=10, pady=10)
+        theme_combo = ttk.Combobox(appearance_tab, textvariable=theme_var, values=["Light", "Dark"], state="readonly", width=10)
+        theme_combo.grid(row=0, column=1, sticky="w", padx=10, pady=10)
+
+        # --- Advanced Tab (always visible) ---
+        advanced_tab = ttk.Frame(notebook)
+        notebook.add(advanced_tab, text="Advanced")
+        ttk.Label(advanced_tab, text="(Advanced options coming soon)").pack(padx=20, pady=(20, 5), anchor="w")
+        gdown_chk = ttk.Checkbutton(
+            advanced_tab,
+            text="Enable gdown fallback for Google Drive downloads (not recommended unless API fails)",
+            variable=self.use_gdown_fallback
+        )
+        gdown_chk.pack(padx=20, pady=(5, 20), anchor="w")
+        self.add_tooltip(gdown_chk, "If enabled, will use gdown to download Google Drive folders if the API fails or credentials are missing. This may be less reliable.")
 
         def save_and_close():
             self.base_dir.set(download_var.get())
@@ -684,6 +744,8 @@ class DownloaderGUI:
             self.concurrent_downloads.set(concurrency_var.get())
             self.config["proxy"] = proxy_var.get()
             self.config["speed_limit_kbps"] = speed_var.get()
+            if self.config.get('show_advanced', False):
+                self.config["use_gdown_fallback"] = self.use_gdown_fallback.get()
             # Theme
             new_dark = (theme_var.get() == "Dark")
             if new_dark != self.dark_mode:
@@ -695,7 +757,7 @@ class DownloaderGUI:
             messagebox.showinfo("Settings", "Settings updated.")
 
         save_btn = ttk.Button(win, text="Save", command=save_and_close)
-        save_btn.grid(row=7, column=0, columnspan=3, pady=20)
+        save_btn.pack(pady=12)
 
         # Tooltips
         self.add_tooltip(download_entry, "Edit the download folder path.")
@@ -962,72 +1024,79 @@ class DownloaderGUI:
 
     def download_gdrive_with_fallback(self, url, gdrive_dir, credentials_path):
         import re
-        match = re.search(r'/folders/([a-zA-Z0-9_-]+)', url)
-        if match:
+        try:
+            match = re.search(r'/folders/([a-zA-Z0-9_-]+)', url)
+            if not match:
+                self.logger.error("Google Drive folder ID not found in URL.")
+                self.show_error_dialog("Google Drive folder ID not found in URL.")
+                return
             folder_id = match.group(1)
+            # Only use gdown fallback if advanced is enabled and user checked it
+            use_gdown_fallback = self.config.get('show_advanced', False) and self.config.get('use_gdown_fallback', False)
             if os.path.exists(credentials_path):
                 try:
                     os.makedirs(gdrive_dir, exist_ok=True)
                     self.download_drive_folder_api(folder_id, gdrive_dir, credentials_path)
-                except PermissionError as perm_err:
-                    self.logger.error(f"Permission denied: {perm_err}", exc_info=True)
-                    self.show_error_dialog(f"Permission denied: {perm_err}")
+                    return
                 except Exception as e:
                     self.logger.error(f"Google Drive API download failed: {e}")
-                    self.logger.info("Falling back to gdown...")
-                    try:
-                        import gdown
-                        os.makedirs(gdrive_dir, exist_ok=True)
-                        # Download all files, but skip those that already exist
-                        file_list = gdown.download_folder(url=url, output=gdrive_dir, quiet=False, use_cookies=False, remaining_ok=True, return_filelist=True)
-                        if file_list:
-                            for f in file_list:
-                                if os.path.exists(f):
-                                    self.logger.info(f"Skipping (already exists): {f}")
-                                else:
-                                    gdown.cached_download(f, quiet=False)
-                    except PermissionError as perm_err2:
-                        self.logger.error(f"gdown fallback permission denied: {perm_err2}", exc_info=True)
-                        self.show_error_dialog(f"gdown fallback permission denied: {perm_err2}")
-                    except Exception as e2:
-                        self.logger.error(f"gdown fallback failed: {e2}")
-                        self.show_error_dialog(f"gdown fallback failed: {e2}")
+                    # Prompt user to enable advanced fallback
+                    if not self.config.get('show_advanced', False):
+                        if messagebox.askyesno("Google Drive API Error", f"Google Drive API download failed: {e}\n\nWould you like to enable the advanced fallback (gdown) option?"):
+                            self.config['show_advanced'] = True
+                            self.save_config()
+                            self.open_settings_dialog()
+                        return
+                    if not use_gdown_fallback:
                         self.show_error_dialog(
-                            "To enable full Google Drive access, create a credentials.json file as follows:\n"
-                            "1. Go to https://console.cloud.google.com/\n"
-                            "2. Create/select a project, enable the Google Drive API.\n"
-                            "3. Go to 'APIs & Services > Credentials', create a Service Account, and download the JSON key.\n"
-                            "4. Save it as credentials.json in this folder.\n",
-                            title="Google Drive Credentials Required"
+                            f"Google Drive API download failed: {e}\n\nYou can try the gdown fallback by enabling it in the Advanced tab.",
+                            "Google Drive API Error"
                         )
-            else:
-                try:
-                    import gdown
-                    os.makedirs(gdrive_dir, exist_ok=True)
-                    file_list = gdown.download_folder(url=url, output=gdrive_dir, quiet=False, use_cookies=False, remaining_ok=True, return_filelist=True)
-                    if file_list:
-                        for f in file_list:
-                            if os.path.exists(f):
-                                self.logger.info(f"Skipping (already exists): {f}")
-                            else:
-                                gdown.cached_download(f, quiet=False)
-                except PermissionError as perm_err:
-                    self.logger.error(f"gdown permission denied: {perm_err}", exc_info=True)
-                    self.show_error_dialog(f"gdown permission denied: {perm_err}")
-                except Exception as e2:
-                    self.logger.error(f"gdown failed: {e2}")
-                    self.show_error_dialog(f"gdown failed: {e2}")
-                    self.show_error_dialog(
-                        "To enable full Google Drive access, create a credentials.json file as follows:\n"
-                        "1. Go to https://console.cloud.google.com/\n"
-                        "2. Create/select a project, enable the Google Drive API.\n"
-                        "3. Go to 'APIs & Services > Credentials', create a Service Account, and download the JSON key.\n"
-                        "4. Save it as credentials.json in this folder.\n",
-                        title="Google Drive Credentials Required"
-                    )
-        else:
-            self.logger.error("Google Drive folder ID not found in URL.")
-            self.show_error_dialog("Google Drive folder ID not found in URL.")
+                        return
+                    self.logger.info("Falling back to gdown as requested...")
+            elif not use_gdown_fallback:
+                self.logger.error("No credentials.json found. Not attempting gdown fallback unless requested.")
+                # Prompt user to enable advanced fallback
+                if not self.config.get('show_advanced', False):
+                    if messagebox.askyesno("Google Drive Credentials Required", "No credentials.json found. Would you like to enable the advanced fallback (gdown) option?"):
+                        self.config['show_advanced'] = True
+                        self.save_config()
+                        self.open_settings_dialog()
+                    return
+                self.show_error_dialog(
+                    "No credentials.json found. To use the gdown fallback, enable it in the Advanced tab.",
+                    "Google Drive Credentials Required"
+                )
+                return
+            # If we reach here, either credentials are missing or API failed and fallback is requested
+            try:
+                import gdown
+                os.makedirs(gdrive_dir, exist_ok=True)
+                self.logger.info("Attempting gdown fallback for Google Drive folder download...")
+                file_list = self.download_gdrive_folder(url, gdrive_dir)
+                if file_list:
+                    for rel_path, dest_path in file_list:
+                        if os.path.exists(dest_path):
+                            self.logger.info(f"Skipping (already exists): {dest_path}")
+                        else:
+                            self.logger.info(f"Downloaded: {dest_path}")
+                else:
+                    self.logger.warning("gdown fallback did not return any files.")
+            except Exception as e2:
+                self.logger.error(f"gdown fallback failed: {e2}")
+                # Show user-friendly error
+                self.show_error_dialog(
+                    "Google Drive fallback (gdown) failed. This may be due to a bug in gdown or an unsupported folder. Please check the log for technical details.\n\nTo enable full Google Drive access, create a credentials.json file as follows:\n"
+                    "1. Go to https://console.cloud.google.com/\n"
+                    "2. Create/select a project, enable the Google Drive API.\n"
+                    "3. Go to 'APIs & Services > Credentials', create a Service Account, and download the JSON key.\n"
+                    "4. Save it as credentials.json in this folder.\n",
+                    title="Google Drive Fallback Error"
+                )
+        except Exception as e:
+            import traceback
+            self.logger.error(f"Unexpected error in download_gdrive_with_fallback: {e}\n{traceback.format_exc()}")
+            self.show_error_dialog(f"Unexpected error in download_gdrive_with_fallback: {e}")
 
     def download_files_threaded(self, page, base_url, base_dir, visited=None, skipped_files=None, file_tree=None, all_files=None):
         allowed_domains = [
@@ -1238,6 +1307,27 @@ class DownloaderGUI:
             pass
 
     def create_widgets(self):
+        # --- Modern Progress Bar Style ---
+        style = ttk.Style()
+        # Use a unique style name to avoid global side effects
+        style.theme_use('clam')  # 'clam' is modern and cross-platform
+        style.configure('Modern.Horizontal.TProgressbar',
+                        troughcolor='#e0e0e0' if not self.dark_mode else '#222',
+                        bordercolor='#b0b0b0' if not self.dark_mode else '#444',
+                        background='#4a90e2' if not self.dark_mode else '#6fa8dc',
+                        lightcolor='#4a90e2' if not self.dark_mode else '#6fa8dc',
+                        darkcolor='#357ab7' if not self.dark_mode else '#27496d',
+                        thickness=18,
+                        relief='flat')
+        # For file progress, use a different color
+        style.configure('ModernFile.Horizontal.TProgressbar',
+                        troughcolor='#e0e0e0' if not self.dark_mode else '#222',
+                        bordercolor='#b0b0b0' if not self.dark_mode else '#444',
+                        background='#7ed957' if not self.dark_mode else '#8fd694',
+                        lightcolor='#7ed957' if not self.dark_mode else '#8fd694',
+                        darkcolor='#4e944f' if not self.dark_mode else '#386641',
+                        thickness=14,
+                        relief='flat')
         # Make window scalable
         self.root.geometry('1100x800')
         self.root.minsize(800, 600)
@@ -1254,19 +1344,17 @@ class DownloaderGUI:
         main_tab.grid_columnconfigure(0, weight=1)
         self._notebook.add(main_tab, text="Downloader")
 
-        # Download history tab
-        self.history_tab = ttk.Frame(self._notebook)
-        self.history_tab.grid_rowconfigure(0, weight=1)
-        self.history_tab.grid_columnconfigure(0, weight=1)
-        self._notebook.add(self.history_tab, text="Download History")
+        # ...existing code for main_tab, container, canvas, self.frame, etc...
 
-        # Container frame for scrollable content (so menu bar is not covered)
+        # ...existing code for main_tab, container, canvas, self.frame, etc...
+
+
+        # Main tab content frame setup (must come before any reference to self.frame)
         container = ttk.Frame(main_tab)
         container.grid(row=0, column=0, sticky='nsew')
         container.grid_rowconfigure(0, weight=1)
         container.grid_columnconfigure(0, weight=1)
 
-        # Add a scrollable canvas for the main content
         canvas = tk.Canvas(container)
         canvas.grid(row=0, column=0, sticky='nsew')
         vscroll = ttk.Scrollbar(container, orient='vertical', command=canvas.yview)
@@ -1285,19 +1373,44 @@ class DownloaderGUI:
             canvas.itemconfig(frame_id, width=event.width)
         self.canvas.bind('<Configure>', on_canvas_configure)
 
+        # Now set up Download History tab with search/filter
+        self.history_tab = ttk.Frame(self._notebook)
+        self.history_tab.grid_rowconfigure(1, weight=1)
+        self.history_tab.grid_columnconfigure(0, weight=1)
+        self._notebook.add(self.history_tab, text="Download History")
+
+        # Search/filter bar
+        filter_frame = ttk.Frame(self.history_tab)
+        filter_frame.grid(row=0, column=0, sticky='ew', padx=10, pady=(10, 0))
+        ttk.Label(filter_frame, text="Filter:", font=("Segoe UI", 11)).pack(side='left')
+        self.history_filter_var = tk.StringVar()
+        filter_entry = ttk.Entry(filter_frame, textvariable=self.history_filter_var, width=40, font=("Segoe UI", 11))
+        filter_entry.pack(side='left', padx=(5, 0))
+        filter_entry.bind('<KeyRelease>', lambda e: self.refresh_history_log())
+        refresh_btn = ttk.Button(filter_frame, text="Refresh", command=self.refresh_history_log)
+        refresh_btn.pack(side='left', padx=(10, 0))
+
+        # Log viewer
+        import tkinter.scrolledtext as st
+        self.history_text = st.ScrolledText(self.history_tab, height=40, width=120, state='disabled', wrap='word', font=("Segoe UI", 11))
+        self.history_text.grid(row=1, column=0, sticky='nsew', padx=10, pady=10)
+        self.add_tooltip(self.history_text, "View the download and error log history.")
+        self.refresh_history_log()
+
         # --- Main Downloader UI ---
 
         # Title
-        title = ttk.Label(self.frame, text="Epstein Court Records Downloader", font=("Segoe UI", 22, "bold"))
+        title = ttk.Label(self.frame, text="Epstein Court Records Downloader", font=("Segoe UI", 26, "bold"))
         title.grid(row=0, column=0, columnspan=4, pady=(10, 20), sticky="nsew")
 
         # --- Download Controls Group ---
         download_controls = ttk.LabelFrame(self.frame, text="Download Controls", padding=(15, 10))
         download_controls.grid(row=1, column=0, columnspan=4, sticky="ew", padx=10, pady=(0, 15))
         download_controls.columnconfigure(1, weight=1)
-        concurrent_label = ttk.Label(download_controls, text="Concurrent Downloads:")
+        download_controls.configure(labelanchor='n')
+        concurrent_label = ttk.Label(download_controls, text="Concurrent Downloads:", font=("Segoe UI", 12))
         concurrent_label.grid(row=0, column=0, sticky="e", padx=(0, 8), pady=5)
-        concurrent_spin = ttk.Spinbox(download_controls, from_=1, to=32, textvariable=self.concurrent_downloads, width=5, increment=1)
+        concurrent_spin = ttk.Spinbox(download_controls, from_=1, to=32, textvariable=self.concurrent_downloads, width=5, increment=1, font=("Segoe UI", 12))
         concurrent_spin.grid(row=0, column=1, sticky="w", pady=5)
         self.add_tooltip(concurrent_spin, "Set the number of concurrent downloads (threads)")
         self.add_tooltip(concurrent_label, "Set the number of concurrent downloads (threads)")
@@ -1306,13 +1419,15 @@ class DownloaderGUI:
         url_section = ttk.LabelFrame(self.frame, text="Download URLs", padding=(15, 10))
         url_section.grid(row=2, column=0, columnspan=4, sticky="ew", padx=10, pady=(0, 15))
         url_section.columnconfigure(1, weight=1)
-        self.url_listbox = tk.Listbox(url_section, height=6, width=80)
+        url_section.configure(labelanchor='n')
+        self.url_listbox = tk.Listbox(url_section, height=6, width=80, font=("Segoe UI", 11))
         self.url_listbox.grid(row=0, column=0, columnspan=3, sticky="ew", padx=(0, 8), pady=5)
         self.url_listbox.delete(0, tk.END)
         for url in self.urls:
             self.url_listbox.insert(tk.END, url)
         self.add_tooltip(self.url_listbox, "List of URLs to download. Select to remove or view details.")
-        self.url_entry = ttk.Entry(url_section, width=60)
+        self.setup_url_listbox_context_menu()
+        self.url_entry = ttk.Entry(url_section, width=60, font=("Segoe UI", 11))
         self.url_entry.grid(row=1, column=0, sticky="ew", pady=5)
         add_url_btn = ttk.Button(url_section, text="Add URL", command=self.add_url)
         add_url_btn.grid(row=1, column=1, sticky="w", padx=(8, 0), pady=5)
@@ -1336,7 +1451,8 @@ class DownloaderGUI:
         dir_section = ttk.LabelFrame(self.frame, text="Download Folder", padding=(15, 10))
         dir_section.grid(row=3, column=0, columnspan=4, sticky="ew", padx=10, pady=(0, 15))
         dir_section.columnconfigure(1, weight=1)
-        dir_entry = ttk.Entry(dir_section, textvariable=self.base_dir, width=60)
+        dir_section.configure(labelanchor='n')
+        dir_entry = ttk.Entry(dir_section, textvariable=self.base_dir, width=60, font=("Segoe UI", 11))
         dir_entry.grid(row=0, column=0, sticky="ew", pady=5)
         dir_btn = ttk.Button(dir_section, text="Browse", command=self.browse_dir)
         dir_btn.grid(row=0, column=1, sticky="w", padx=(8, 0), pady=5)
@@ -1346,41 +1462,43 @@ class DownloaderGUI:
         # --- Action Buttons Group ---
         action_section = ttk.LabelFrame(self.frame, text="Actions", padding=(15, 10))
         action_section.grid(row=4, column=0, columnspan=4, sticky="ew", padx=10, pady=(0, 15))
-        self.download_btn = ttk.Button(action_section, text="Start Download", command=self.start_download_all_thread)
+        action_section.configure(labelanchor='n')
+        self.download_btn = ttk.Button(action_section, text="▶ Start Download", command=self.start_download_all_thread)
         self.download_btn.grid(row=0, column=0, pady=5, padx=(0, 8), sticky="ew")
         self.add_tooltip(self.download_btn, "Start downloading all files from the URLs above (runs in background, UI stays responsive)")
-        self.pause_btn = ttk.Button(action_section, text="Pause", command=self.pause_downloads)
+        self.pause_btn = ttk.Button(action_section, text="⏸ Pause", command=self.pause_downloads)
         self.pause_btn.grid(row=0, column=1, pady=5, padx=(0, 8), sticky="ew")
         self.add_tooltip(self.pause_btn, "Pause all downloads in progress.")
-        self.resume_btn = ttk.Button(action_section, text="Resume", command=self.resume_downloads, state='disabled')
+        self.resume_btn = ttk.Button(action_section, text="▶ Resume", command=self.resume_downloads, state='disabled')
         self.resume_btn.grid(row=0, column=2, pady=5, padx=(0, 8), sticky="ew")
         self.add_tooltip(self.resume_btn, "Resume paused downloads.")
-        self.schedule_btn = ttk.Button(action_section, text="Schedule Download", command=self.open_schedule_window)
+        self.schedule_btn = ttk.Button(action_section, text="⏰ Schedule", command=self.open_schedule_window)
         self.schedule_btn.grid(row=0, column=3, pady=5, padx=(0, 8), sticky="ew")
         self.add_tooltip(self.schedule_btn, "Schedule downloads for specific days and times")
-        self.json_btn = ttk.Button(action_section, text="Show Downloaded JSON", command=self.show_json)
+        self.json_btn = ttk.Button(action_section, text="📄 Show Downloaded JSON", command=self.show_json)
         self.json_btn.grid(row=1, column=0, pady=5, padx=(0, 8), sticky="ew")
         self.add_tooltip(self.json_btn, "Show the JSON file of downloaded files")
-        self.skipped_btn = ttk.Button(action_section, text="Show Skipped Files", command=self.show_skipped)
+        self.skipped_btn = ttk.Button(action_section, text="🚫 Show Skipped Files", command=self.show_skipped)
         self.skipped_btn.grid(row=1, column=1, pady=5, padx=(0, 8), sticky="ew")
         self.add_tooltip(self.skipped_btn, "Show files that were skipped (already exist or duplicate)")
 
         # --- Progress Section ---
         progress_section = ttk.LabelFrame(self.frame, text="Progress", padding=(15, 10))
         progress_section.grid(row=5, column=0, columnspan=4, sticky="ew", padx=10, pady=(0, 15))
-        progress_label = ttk.Label(progress_section, text="Overall Progress:")
+        progress_section.configure(labelanchor='n')
+        progress_label = ttk.Label(progress_section, text="Overall Progress:", font=("Segoe UI", 12))
         progress_label.grid(row=0, column=0, sticky="w", pady=(0, 5))
         self.add_tooltip(progress_label, "Shows the overall download progress.")
-        self.progress = ttk.Progressbar(progress_section, orient='horizontal', length=400, mode='determinate')
+        self.progress = ttk.Progressbar(progress_section, orient='horizontal', length=400, mode='determinate', style='Modern.Horizontal.TProgressbar')
         self.progress.grid(row=0, column=1, columnspan=3, pady=(0, 5), sticky="ew")
         self.add_tooltip(self.progress, "Overall progress for all downloads.")
-        file_progress_label = ttk.Label(progress_section, text="Current File:")
+        file_progress_label = ttk.Label(progress_section, text="Current File:", font=("Segoe UI", 12))
         file_progress_label.grid(row=1, column=0, sticky="w", pady=(0, 5))
-        self.file_progress = ttk.Progressbar(progress_section, orient='horizontal', length=400, mode='determinate')
+        self.file_progress = ttk.Progressbar(progress_section, orient='horizontal', length=400, mode='determinate', style='ModernFile.Horizontal.TProgressbar')
         self.file_progress.grid(row=1, column=1, columnspan=3, pady=(0, 5), sticky="ew")
         self.add_tooltip(self.file_progress, "Progress for the current file being downloaded.")
         self.speed_eta_var = tk.StringVar(value="Speed: -- ETA: --")
-        self.speed_eta_label = ttk.Label(progress_section, textvariable=self.speed_eta_var)
+        self.speed_eta_label = ttk.Label(progress_section, textvariable=self.speed_eta_var, font=("Segoe UI", 11))
         self.speed_eta_label.grid(row=2, column=0, columnspan=4, sticky="w", pady=(0, 5))
         self.add_tooltip(self.speed_eta_label, "Shows current download speed and estimated time remaining for the current file.")
 
@@ -1388,10 +1506,11 @@ class DownloaderGUI:
         import tkinter.scrolledtext as st
         status_section = ttk.LabelFrame(self.frame, text="Status Log", padding=(15, 10))
         status_section.grid(row=6, column=0, columnspan=4, sticky="nsew", padx=10, pady=(0, 15))
-        status_pane_label = ttk.Label(status_section, text="Status Pane:")
+        status_section.configure(labelanchor='n')
+        status_pane_label = ttk.Label(status_section, text="Status Pane:", font=("Segoe UI", 12))
         status_pane_label.grid(row=0, column=0, sticky="w", pady=(0, 5))
         self.add_tooltip(status_pane_label, "Shows log messages and status updates.")
-        self.status_pane = st.ScrolledText(status_section, height=10, width=100, state='disabled', wrap='word')
+        self.status_pane = st.ScrolledText(status_section, height=10, width=100, state='disabled', wrap='word', font=("Segoe UI", 11))
         self.status_pane.grid(row=1, column=0, columnspan=4, sticky="nsew", pady=(0, 5))
         self.add_tooltip(self.status_pane, "Log and status output. Shows download progress, errors, and info.")
         self.status_pane_visible = True
@@ -1406,23 +1525,38 @@ class DownloaderGUI:
         # Store references for toggling log panel
         self._main_canvas = self.canvas
         self._main_frame = self.frame
-        self._status_pane_label = status_pane_label
 
-        # Persistent Status Bar (bottom of window)
-        self.status_bar = ttk.Label(self.root, textvariable=self.status, relief=tk.SUNKEN, anchor='w', foreground='blue')
-        self.status_bar.grid(row=1, column=0, sticky='ew')
+        # Persistent Status Bar (bottom of window) with summary
+        self.summary_var = tk.StringVar(value="Queued: 0 | Completed: 0 | Failed: 0")
+        status_frame = ttk.Frame(self.root)
+        status_frame.grid(row=1, column=0, sticky='ew')
+        status_frame.columnconfigure(1, weight=1)
+        self.status_bar = ttk.Label(status_frame, textvariable=self.status, relief=tk.SUNKEN, anchor='w', foreground='blue')
+        self.status_bar.grid(row=0, column=0, sticky='ew')
+        self.summary_bar = ttk.Label(status_frame, textvariable=self.summary_var, relief=tk.SUNKEN, anchor='e', foreground='green')
+        self.summary_bar.grid(row=0, column=1, sticky='ew')
         self.add_tooltip(self.status_bar, "Persistent status bar. Shows the latest status message.")
+        self.add_tooltip(self.summary_bar, "Summary: queued, completed, failed counts.")
 
-        # Quit Button (move to main frame for visibility)
-
+        # Quit and Dark Mode buttons (always visible, bottom row of main frame)
         quit_btn = ttk.Button(self.frame, text="Quit", command=self.force_quit)
         quit_btn.grid(row=13, column=0, sticky="w", pady=(10, 0))
         self.add_tooltip(quit_btn, "Force quit the application immediately")
-
-        # Dark Mode Toggle
         dark_btn = ttk.Button(self.frame, text="Toggle Dark Mode", command=self.toggle_dark_mode)
         dark_btn.grid(row=13, column=3, sticky="e", pady=(10, 0))
         self.add_tooltip(dark_btn, "Switch between light and dark mode")
+
+    def update_summary_bar(self, queued=None, completed=None, failed=None):
+        # Update the summary bar with current counts
+        if not hasattr(self, '_summary_counts'):
+            self._summary_counts = {'queued': 0, 'completed': 0, 'failed': 0}
+        if queued is not None:
+            self._summary_counts['queued'] = queued
+        if completed is not None:
+            self._summary_counts['completed'] = completed
+        if failed is not None:
+            self._summary_counts['failed'] = failed
+        self.summary_var.set(f"Queued: {self._summary_counts['queued']} | Completed: {self._summary_counts['completed']} | Failed: {self._summary_counts['failed']}")
 
         # Make widgets expand with window
         for i in range(4):
@@ -1430,11 +1564,9 @@ class DownloaderGUI:
         for i in range(14):
             self.frame.rowconfigure(i, weight=0)
         self.frame.rowconfigure(12, weight=1)
-
         # Store references for toggling log panel
         self._main_canvas = self.canvas
         self._main_frame = self.frame
-        self._status_pane_label = status_pane_label
 
     def clear_completed_urls(self):
         """Remove all URLs that have already been processed from the queue and listbox."""
@@ -1459,8 +1591,10 @@ class DownloaderGUI:
         self.refresh_history_log()
 
     def refresh_history_log(self):
-        """Refresh the download history log viewer tab."""
+        """Refresh the download history log viewer tab, with optional filtering."""
         log_path = getattr(self, 'log_file', None)
+        filter_text = getattr(self, 'history_filter_var', None)
+        filter_val = filter_text.get().strip().lower() if filter_text else ''
         if not log_path or not os.path.exists(log_path):
             self.history_text.configure(state='normal')
             self.history_text.delete('1.0', tk.END)
@@ -1469,7 +1603,10 @@ class DownloaderGUI:
             return
         try:
             with open(log_path, 'r', encoding='utf-8') as f:
-                log_content = f.read()
+                lines = f.readlines()
+            if filter_val:
+                lines = [line for line in lines if filter_val in line.lower()]
+            log_content = ''.join(lines)
             self.history_text.configure(state='normal')
             self.history_text.delete('1.0', tk.END)
             self.history_text.insert(tk.END, log_content)
@@ -1655,6 +1792,8 @@ class DownloaderGUI:
         # Note: If already in queue, it will be skipped in process_download_queue
 
     def process_download_queue(self):
+        # Track summary counts
+        self.update_summary_bar(queued=len(self.urls), completed=0, failed=0)
         """
         Implements a download queue system. Each URL is queued and processed in order, with progress bar updates.
         Allows dynamic add/remove of URLs during download. Skips duplicate files.
@@ -1683,6 +1822,7 @@ class DownloaderGUI:
                 browser = p.chromium.launch(headless=True)
                 context = browser.new_context()
                 page = context.new_page()
+                failed_count = 0
                 while not url_queue.empty():
                     # Pause support
                     while not self._pause_event.is_set():
@@ -1693,34 +1833,41 @@ class DownloaderGUI:
                         continue
                     seen_urls.add(url)
                     self.thread_safe_status(f"Processing: {url}")
-                    if url.startswith('https://drive.google.com/drive/folders/'):
-                        credentials_path = self.config.get('credentials_path', None)
-                        gdrive_dir = os.path.join(base_dir, 'GoogleDrive')
-                        self.logger.info(f"Processing Google Drive folder: {url}")
-                        self.download_gdrive_with_fallback(url, gdrive_dir, credentials_path)
-                    else:
-                        self.logger.info(f"Visiting: {url}")
-                        # Check for duplicate files before download
-                        s, t, a = self.download_files_threaded(page, url, base_dir, skipped_files=self.skipped_files, file_tree=self.file_tree)
-                        # Only add files that are not already downloaded
-                        for f in t.values():
-                            for file_path in f:
-                                if file_path in downloaded_files:
-                                    self.logger.info(f"Skipping duplicate file: {file_path}")
-                                else:
-                                    downloaded_files.add(file_path)
-                        self.skipped_files.update(s or set())
-                        self.file_tree.update(t or {})
-                    url_queue.task_done()
-                    processed += 1
-                    self.processed_count = processed
-                    self.progress['value'] = processed
-                    self.root.update_idletasks()
-                    self.save_queue_state()
+                    try:
+                        if url.startswith('https://drive.google.com/drive/folders/'):
+                            credentials_path = self.config.get('credentials_path', None)
+                            gdrive_dir = os.path.join(base_dir, 'GoogleDrive')
+                            self.logger.info(f"Processing Google Drive folder: {url}")
+                            self.download_gdrive_with_fallback(url, gdrive_dir, credentials_path)
+                        else:
+                            self.logger.info(f"Visiting: {url}")
+                            # Check for duplicate files before download
+                            s, t, a = self.download_files_threaded(page, url, base_dir, skipped_files=self.skipped_files, file_tree=self.file_tree)
+                            # Only add files that are not already downloaded
+                            for f in t.values():
+                                for file_path in f:
+                                    if file_path in downloaded_files:
+                                        self.logger.info(f"Skipping duplicate file: {file_path}")
+                                    else:
+                                        downloaded_files.add(file_path)
+                            self.skipped_files.update(s or set())
+                            self.file_tree.update(t or {})
+                        url_queue.task_done()
+                        processed += 1
+                        self.processed_count = processed
+                        self.progress['value'] = processed
+                        self.update_summary_bar(queued=url_queue.qsize(), completed=processed, failed=failed_count)
+                        self.root.update_idletasks()
+                        self.save_queue_state()
+                    except Exception as e:
+                        failed_count += 1
+                        self.update_summary_bar(queued=url_queue.qsize(), completed=processed, failed=failed_count)
+                        self.logger.error(f"Exception processing {url}: {e}", exc_info=True)
                 browser.close()
         except Exception as e:
             self.logger.error(f"Exception in download queue: {e}", exc_info=True)
         self.progress['value'] = total
+        self.update_summary_bar(queued=0, completed=processed, failed=failed_count)
         self.root.update_idletasks()
         self.logger.info("All downloads in queue complete.")
         self.thread_safe_status("All downloads in queue complete.")
@@ -1733,43 +1880,77 @@ class DownloaderGUI:
         os.makedirs(output_dir, exist_ok=True)
         logger.info(f"Starting Google Drive folder download: {folder_url} to {output_dir}")
         try:
-            # Scan for all files in the folder (metadata only)
-            logger.info(f"Scanning Google Drive folder for file list: {folder_url}")
-            file_list = gdown.download_folder(url=folder_url, output=output_dir, quiet=True, use_cookies=False, remaining_ok=True, return_filelist=True, skip_download=True)
-            logger.info(f"Found {len(file_list)} files in Google Drive folder.")
-            to_download = []
-            for f in file_list:
-                if not os.path.exists(f):
-                    to_download.append(f)
-                else:
-                    logger.info(f"Skipping (already exists): {f}")
-            logger.info(f"{len(to_download)} files to download (missing locally).")
+            logger.info(f"Listing subfolders and files in Google Drive folder: {folder_url}")
+            folder_list = gdown.download_folder(url=folder_url, output=output_dir, quiet=True, use_cookies=False, remaining_ok=True)
+            if not folder_list:
+                logger.error(f"No files found or failed to list files in Google Drive folder: {folder_url}")
+                return []
+            subfolders = set()
+            files = []
+            for item in folder_list:
+                if isinstance(item, dict) and item.get('mimeType') == 'application/vnd.google-apps.folder':
+                    subfolders.add(item['id'])
+                elif isinstance(item, dict):
+                    files.append(item)
+            logger.info(f"Found {len(subfolders)} subfolders and {len(files)} files in root folder.")
+            batch_size = 45
             result = []
-            failed = []
-            max_retries = 3
-            for dest_path in to_download:
-                rel_path = os.path.relpath(dest_path, output_dir)
-                for attempt in range(1, max_retries + 1):
+            # Download files in root folder
+            for i in range(0, len(files), batch_size):
+                batch = files[i:i+batch_size]
+                logger.info(f"Downloading batch {i//batch_size+1} in root: files {i+1} to {min(i+batch_size, len(files))}")
+                for file_info in batch:
+                    file_id = file_info['id']
+                    file_name = file_info['name']
+                    dest_path = os.path.join(output_dir, file_name)
+                    # Pause support
+                    while hasattr(self, '_pause_event') and not self._pause_event.is_set():
+                        time.sleep(0.1)
+                    logger.info(f"Downloading Google Drive file: {file_name} to {dest_path}")
                     try:
-                        logger.info(f"Downloading {rel_path} (Attempt {attempt})")
-                        gdown.cached_download(dest_path, quiet=False)
-                        logger.info(f"Downloaded Google Drive file: {rel_path} to {dest_path}")
-                        result.append((rel_path, dest_path))
-                        break
+                        gdown.download(id=file_id, output=dest_path, quiet=False, use_cookies=False)
+                        result.append((file_name, dest_path))
+                        logger.info(f"Downloaded Google Drive file: {file_name} to {dest_path}")
                     except Exception as e:
-                        logger.error(f"Failed to download {rel_path} (Attempt {attempt}): {e}")
-                        if attempt == max_retries:
-                            logger.error(f"Permanently failed to download {rel_path} after {max_retries} attempts.")
-                            failed.append(rel_path)
-            if failed:
-                logger.error(f"Failed to download {len(failed)} files from Google Drive after retries: {failed}")
+                        logger.error(f"Failed to download Google Drive file {file_name}: {e}")
+            # Download files from each subfolder
+            for subfolder_id in subfolders:
+                subfolder_url = f"https://drive.google.com/drive/folders/{subfolder_id}"
+                subfolder_output = os.path.join(output_dir, subfolder_id)
+                os.makedirs(subfolder_output, exist_ok=True)
+                logger.info(f"Listing files in subfolder: {subfolder_url}")
+                subfolder_list = gdown.download_folder(url=subfolder_url, output=subfolder_output, quiet=True, use_cookies=False, remaining_ok=True)
+                subfolder_files = [f for f in subfolder_list if isinstance(f, dict) and f.get('mimeType') != 'application/vnd.google-apps.folder']
+                logger.info(f"Found {len(subfolder_files)} files in subfolder {subfolder_id}.")
+                for i in range(0, len(subfolder_files), batch_size):
+                    batch = subfolder_files[i:i+batch_size]
+                    logger.info(f"Downloading batch {i//batch_size+1} in subfolder {subfolder_id}: files {i+1} to {min(i+batch_size, len(subfolder_files))}")
+                    for file_info in batch:
+                        file_id = file_info['id']
+                        file_name = file_info['name']
+                        dest_path = os.path.join(subfolder_output, file_name)
+                        # Pause support
+                        while hasattr(self, '_pause_event') and not self._pause_event.is_set():
+                            time.sleep(0.1)
+                        logger.info(f"Downloading Google Drive file: {file_name} to {dest_path}")
+                        try:
+                            gdown.download(id=file_id, output=dest_path, quiet=False, use_cookies=False)
+                            result.append((os.path.join(subfolder_id, file_name), dest_path))
+                            logger.info(f"Downloaded Google Drive file: {file_name} to {dest_path}")
+                        except Exception as e:
+                            logger.error(f"Failed to download Google Drive file {file_name}: {e}")
             logger.info(f"Completed Google Drive folder download: {folder_url}")
             return result
         except Exception as e:
-            msg = f"Failed to process Google Drive folder: {e}"
+            import traceback
+            msg = f"Failed to process Google Drive folder: {e}\n{traceback.format_exc()}"
             logger.error(msg)
+            # Show only a user-friendly error dialog
             try:
-                messagebox.showerror("Google Drive Error", msg)
+                messagebox.showerror(
+                    "Google Drive Download Error",
+                    "A problem occurred while downloading from Google Drive. This may be due to a bug in gdown or an unsupported folder. Please check the log for technical details."
+                )
             except Exception:
                 pass
             return []
