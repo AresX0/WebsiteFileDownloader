@@ -38,6 +38,17 @@ except ImportError:
 
     DND_AVAILABLE = False
 from datetime import datetime
+try:
+    import requests
+except ImportError:
+    # Helpful message when running script outside the project's virtual environment
+    sys.stderr.write(
+        "Missing dependency: requests.\n"
+        "Please run the repo setup script to create and populate a virtualenv:\n"
+        "  PowerShell: .\\scripts\\setup_env.ps1\n"
+        "  or: python -m pip install -r requirements.txt\n"
+    )
+    raise
 import requests
 import time
 import importlib.util
@@ -148,6 +159,10 @@ def install_dependencies_with_progress(root=None):
                 pass
             return
         if installer_thread.is_alive():
+            # Still running; poll again shortly (keep interval short for responsive cancel)
+            if root is not None and getattr(root, "after", None):
+                try:
+                    root.after(100, _poll)
             # Still running; poll again shortly
             if root is not None and getattr(root, "after", None):
                 try:
@@ -178,6 +193,10 @@ def install_dependencies_with_progress(root=None):
             except Exception:
                 close_progress()
 
+    # Start polling (short initial delay so cancel actions are responsive)
+    if root is not None and getattr(root, "after", None):
+        try:
+            root.after(50, _poll)
     # Start polling
     if root is not None and getattr(root, "after", None):
         try:
@@ -346,6 +365,18 @@ class DownloaderGUI:
             "https://www.justice.gov/epstein/doj-disclosures",
             "https://drive.google.com/drive/folders/1TrGxDGQLDLZu1vvvZDBAh-e7wN3y6Hoz?usp=sharing",
         ]
+        # Persisted state and config prefer repo-local files during development/tests
+        repo_root = os.path.abspath(os.path.dirname(__file__))
+        repo_config = os.path.join(repo_root, "config.json")
+        repo_queue = os.path.join(repo_root, "queue_state.json")
+        if os.path.exists(repo_config) or os.access(repo_root, os.W_OK):
+            self.config_path = repo_config
+        else:
+            self.config_path = _installed_path("config.json")
+        if os.path.exists(repo_queue) or os.access(repo_root, os.W_OK):
+            self.queue_state_path = repo_queue
+        else:
+            self.queue_state_path = _installed_path("queue_state.json")
         # Persisted state and config live under the installation directory by default
         self.queue_state_path = _installed_path("queue_state.json")
         self.config_path = _installed_path("config.json")
@@ -759,9 +790,34 @@ class DownloaderGUI:
                 "urls": self.urls,
                 "processed_count": getattr(self, "processed_count", 0),
             }
-            with open(self.queue_state_path, "w", encoding="utf-8") as f:
-                json.dump(state, f, indent=2)
-            self.logger.info("Queue state saved.")
+            try:
+                with open(self.queue_state_path, "w", encoding="utf-8") as f:
+                    json.dump(state, f, indent=2)
+                self.logger.info("Queue state saved.")
+            except PermissionError as pe:
+                # Attempt fallbacks: repo-local then user local appdata
+                repo_root = os.path.abspath(os.path.dirname(__file__))
+                repo_queue = os.path.join(repo_root, "queue_state.json")
+                user_dir = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+                alt_dir = os.path.join(user_dir, "EpsteinFilesDownloader")
+                os.makedirs(alt_dir, exist_ok=True)
+                alt_path = os.path.join(alt_dir, "queue_state.json")
+                saved = False
+                for p in [repo_queue, alt_path]:
+                    try:
+                        with open(p, "w", encoding="utf-8") as f:
+                            json.dump(state, f, indent=2)
+                        self.queue_state_path = p
+                        self.logger.info(f"Queue state saved to fallback {p}")
+                        saved = True
+                        break
+                    except Exception:
+                        continue
+                if not saved:
+                    self.logger.error(
+                        f"Failed to save queue state after fallbacks: {pe}",
+                        exc_info=True,
+                    )
         except Exception as e:
             self.logger.error(f"Failed to save queue state: {e}")
 
@@ -812,6 +868,68 @@ class DownloaderGUI:
             self.root.destroy()
         except Exception:
             pass
+
+    def shutdown(self, timeout=5):
+        """Signal background threads to stop and wait for known threads to exit.
+
+        This method attempts a conservative, backward-compatible shutdown:
+        - sets stop/cancel flags so running workers exit quickly
+        - resumes paused threads so they can observe stop requests
+        - stops spinner and other scheduled UI callbacks
+        - joins known long-running threads with a timeout
+        """
+        import time
+
+        # Signal stop and cancellation
+        try:
+            if getattr(self, "_stop_event", None):
+                self._stop_event.set()
+        except Exception:
+            pass
+        try:
+            self._cancel_scan = True
+        except Exception:
+            pass
+        try:
+            # Unpause anything paused so threads can proceed to cooperative exit
+            if getattr(self, "_pause_event", None):
+                self._pause_event.set()
+            self._is_paused = False
+        except Exception:
+            pass
+        # Stop spinner (cancels scheduled after jobs)
+        try:
+            self.stop_spinner()
+        except Exception:
+            pass
+        # Attempt to join tracked threads
+        joinables = []
+        try:
+            if getattr(self, "_download_all_thread", None):
+                joinables.append(self._download_all_thread)
+        except Exception:
+            pass
+        try:
+            if getattr(self, "_process_thread", None):
+                joinables.append(self._process_thread)
+        except Exception:
+            pass
+        # Join with timeout
+        start = time.time()
+        for t in joinables:
+            try:
+                remaining = max(0.0, timeout - (time.time() - start))
+                if remaining <= 0:
+                    break
+                t.join(remaining)
+            except Exception:
+                pass
+        # Give a short grace period for thread pools / workers
+        try:
+            time.sleep(0.1)
+        except Exception:
+            pass
+
 
     def shutdown(self, timeout=5):
         """Signal background threads to stop and wait for known threads to exit.
@@ -967,6 +1085,59 @@ class DownloaderGUI:
         # Accept dropped credentials.json file
         dropped = event.data
         if dropped:
+            # Attempt to parse tcl list-style dropped data; be robust to platform differences
+            try:
+                items = tuple(self.root.tk.splitlist(dropped))
+            except Exception:
+                items = (dropped,)
+            processed = []
+            # If splitlist produced fragments (common on Windows), fall back to the raw dropped string
+            for it in items:
+                cand = it.strip('{}"')
+                processed.append(cand)
+            use_raw = False
+            if len(processed) > 1 and not any(os.path.isabs(p) or ":" in p for p in processed):
+                use_raw = True
+            if use_raw:
+                processed = [dropped.strip('{}"')]
+
+            for item in processed:
+                if item.lower().endswith("credentials.json"):
+                    # If parsed token is not an absolute path and doesn't appear valid, try the raw dropped string
+                    if not (os.path.isabs(item) or ":" in item or os.path.exists(item)):
+                        raw = dropped.strip('{}"')
+                        if raw.lower().endswith("credentials.json"):
+                            item = raw
+                        else:
+                            self.logger.info(
+                                f"Dropped fragment ignored (not a valid path): {item}"
+                            )
+                            continue
+                    # Set credentials path, try to load immediately, and persist
+                    try:
+                        self.credentials_path = item
+                        self.config["credentials_path"] = item
+                        try:
+                            self.reload_credentials(item)
+                        except Exception as e:
+                            self.logger.warning(f"Failed to load credentials on drop: {e}")
+                        self.save_config()
+                        self.logger.info(f"Set credentials.json via drag-and-drop: {item}")
+                        try:
+                            messagebox.showinfo(
+                                "Credentials Set", f"credentials.json set to: {item}"
+                            )
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        self.logger.exception(f"Error handling dropped credentials: {e}")
+                        try:
+                            messagebox.showerror(
+                                "Credentials Error",
+                                f"Failed to set credentials from dropped file: {e}",
+                            )
+                        except Exception:
+                            pass
             items = self.root.tk.splitlist(dropped)
             for item in items:
                 if item.lower().endswith("credentials.json"):
@@ -984,9 +1155,13 @@ class DownloaderGUI:
 
     def load_config(self):
         try:
+            self.logger.debug(f"Loading config from {self.config_path}")
             with open(self.config_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
+                data = json.load(f)
+            self.logger.debug(f"Config loaded: {list(data.keys())}")
+            return data
+        except Exception as e:
+            self.logger.debug(f"Failed to load config from {self.config_path}: {e}")
             return {}
 
     def save_config(self):
@@ -1012,11 +1187,97 @@ class DownloaderGUI:
             # gdown fallback flag
             if hasattr(self, "use_gdown_fallback"):
                 self.config["use_gdown_fallback"] = bool(self.use_gdown_fallback.get())
-            with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(self.config, f, indent=2)
-            self.logger.info(f"Configuration saved to {self.config_path}")
+            try:
+                with open(self.config_path, "w", encoding="utf-8") as f:
+                    json.dump(self.config, f, indent=2)
+                self.logger.info(f"Configuration saved to {self.config_path}")
+            except PermissionError as pe:
+                # Try repo-local config path first, then per-user local app data
+                repo_root = os.path.abspath(os.path.dirname(__file__))
+                repo_config = os.path.join(repo_root, "config.json")
+                user_dir = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+                alt_dir = os.path.join(user_dir, "EpsteinFilesDownloader")
+                os.makedirs(alt_dir, exist_ok=True)
+                alt_path = os.path.join(alt_dir, "config.json")
+                saved = False
+                for p in [repo_config, alt_path]:
+                    try:
+                        with open(p, "w", encoding="utf-8") as f:
+                            json.dump(self.config, f, indent=2)
+                        self.config_path = p
+                        self.logger.info(f"Configuration saved to fallback {p}")
+                        saved = True
+                        break
+                    except Exception:
+                        continue
+                if not saved:
+                    self.logger.error(
+                        f"Failed to save configuration after fallbacks: {pe}",
+                        exc_info=True,
+                    )
         except Exception as e:
             self.logger.error(f"Failed to save configuration: {e}", exc_info=True)
+        # Apply new log_dir immediately so the running app uses it
+        try:
+            if os.path.isdir(getattr(self, "log_dir", "")):
+                self.setup_logger(self.log_dir)
+        except Exception:
+            pass
+
+    def reload_credentials(self, path=None, validate=False):
+        """
+        Attempt to load Google service account credentials from `path` and cache them
+        on the GUI instance as `self.gdrive_credentials`. If `validate` is True, attempt
+        a refresh in a short-lived background thread to verify the credentials can obtain
+        an access token (optional, non-blocking by default).
+        """
+        p = path if path is not None else getattr(self, "credentials_path", None)
+        if not p:
+            # clear cached credentials
+            self.gdrive_credentials = None
+            self.logger.debug("Cleared cached Google Drive credentials (no path provided).")
+            return
+        if not os.path.exists(p):
+            self.logger.warning(f"Credentials file not found: {p}")
+            self.gdrive_credentials = None
+            return
+        try:
+            from google.oauth2 import service_account
+
+            SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+            creds = service_account.Credentials.from_service_account_file(p, scopes=SCOPES)
+            self.gdrive_credentials = creds
+            self.logger.info(f"Loaded Google Drive credentials from {p}")
+        except Exception as e:
+            self.logger.exception(f"Failed to load credentials from {p}: {e}")
+            self.gdrive_credentials = None
+            raise
+        # Optionally validate by trying to refresh the token in background
+        if validate:
+            def _refresh():
+                try:
+                    from google.auth.transport.requests import Request
+
+                    req = Request()
+                    creds.refresh(req)
+                    self.logger.info("Credentials refresh validated successfully.")
+                except Exception as ex:
+                    self.logger.warning(f"Credentials refresh/validation failed: {ex}")
+
+            try:
+                import threading
+
+                t = threading.Thread(target=_refresh, daemon=True)
+                t.start()
+            except Exception:
+                # If threading isn't available, perform sync attempt (best effort)
+                try:
+                    from google.auth.transport.requests import Request
+
+                    creds.refresh(Request())
+                    self.logger.info("Credentials refresh validated successfully (sync).")
+                except Exception as ex:
+                    self.logger.warning(f"Credentials refresh/validation failed (sync): {ex}")
 
     def restore_defaults(self):
         self.base_dir.set(r"C:\Temp\Epstein")
@@ -1034,6 +1295,14 @@ class DownloaderGUI:
         # Persist queue state so defaults are saved immediately
         try:
             self.save_queue_state()
+        except Exception:
+            pass
+        # Clear cached credentials when restoring defaults
+        try:
+            if hasattr(self, "gdrive_credentials"):
+                delattr = getattr(self, "gdrive_credentials", None)
+                if delattr is not None:
+                    self.gdrive_credentials = None
         except Exception:
             pass
         self.save_config()
@@ -1697,6 +1966,11 @@ class DownloaderGUI:
             self.log_dir = log_var.get()
             os.makedirs(self.log_dir, exist_ok=True)
             self.credentials_path = cred_var.get() if cred_var.get() else None
+            # Try to load credentials immediately so changes apply without restart
+            try:
+                self.reload_credentials(self.credentials_path)
+            except Exception as e:
+                self.logger.warning(f"Failed to load credentials from settings dialog: {e}")
             self.concurrent_downloads.set(concurrency_var.get())
             self.config["proxy"] = proxy_var.get()
             self.config["speed_limit_kbps"] = speed_var.get()
@@ -2088,6 +2362,11 @@ class DownloaderGUI:
         if file_path:
             self.credentials_path = file_path
             self.config["credentials_path"] = file_path
+            # Attempt to load and cache credentials immediately so running app can use them
+            try:
+                self.reload_credentials(file_path)
+            except Exception as e:
+                self.logger.warning(f"Failed to load credentials immediately: {e}")
             self.save_config()
             self.logger.info(f"Set credentials.json via File menu: {file_path}")
             messagebox.showinfo(
@@ -2259,6 +2538,7 @@ class DownloaderGUI:
                             "Validate Credentials", "Credentials are valid."
                         ),
                     )
+                except Exception as e:
                 except Exception:
                     self.root.after(
                         0,
@@ -2267,6 +2547,7 @@ class DownloaderGUI:
                             f"Credentials validation failed: {e}",
                         ),
                     )
+            except Exception as e:
             except Exception:
                 self.root.after(
                     0,
@@ -5149,6 +5430,7 @@ class DownloaderGUI:
     def download_drive_folder_api(self, folder_id, gdrive_dir, credentials_path):
         """
         Download all files from a Google Drive folder using the Google Drive API and a service account.
+        Supports using an already-loaded credential object cached on the GUI (so changes are immediate).
         """
         import os
         from googleapiclient.discovery import build
@@ -5156,6 +5438,16 @@ class DownloaderGUI:
         from googleapiclient.http import MediaIoBaseDownload
 
         SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+        # Prefer an already-in-memory credentials object set via reload_credentials()
+        creds = None
+        if getattr(self, "gdrive_credentials", None):
+            creds = self.gdrive_credentials
+        elif credentials_path:
+            creds = service_account.Credentials.from_service_account_file(
+                credentials_path, scopes=SCOPES
+            )
+        else:
+            raise RuntimeError("No credentials available for Google Drive API download")
         creds = service_account.Credentials.from_service_account_file(
             credentials_path, scopes=SCOPES
         )

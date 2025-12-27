@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Git hook to run checks before committing
+set -e
+python tools/check_bom.py
+# Optionally run a small test subset
+# python -m pytest -q tests/smoke_test.py
+exit 0

@@ -1,0 +1,6 @@
+2025-12-26 22:06:50,800 - INFO - Logger initialized.
+2025-12-26 22:06:50,800 - DEBUG - EpsteinFilesDownloader v1.0.0 started. Log file: C:\Path\test_logs\epstein_downloader_20251226_220650.log
+2025-12-26 22:06:50,856 - WARNING - Failed to enable DnD on URL listbox: invalid command name "tkdnd::drop_target"
+2025-12-26 22:06:50,873 - WARNING - Failed to enable DnD on URL listbox: invalid command name "tkdnd::drop_target"
+2025-12-26 22:06:50,873 - WARNING - Failed to enable DnD on main window: '_tkinter.tkapp' object has no attribute 'drop_target_register'
+2025-12-26 22:06:50,875 - INFO - Configuration saved to C:\Path\config.json

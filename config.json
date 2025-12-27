@@ -1,0 +1,19 @@
+{
+  "download_dir": "C:\\Temp\\Epstein",
+  "log_dir": "C:\\Projects\\Website Downloader\\logs",
+  "credentials_path": "C:/Test/credentials.json",
+  "concurrent_downloads": 3,
+  "proxy": "",
+  "speed_limit_kbps": 0,
+  "theme": "light",
+  "use_gdown_fallback": true,
+  "url_list": [
+    "https://www.justice.gov/epstein/court-records",
+    "https://oversight.house.gov/release/oversight-committee-releases-epstein-records-provided-by-the-department-of-justice/",
+    "https://drive.google.com/drive/folders/1TrGxDGQLDLZu1vvvZDBAh-e7wN3y6Hoz?usp=sharing",
+    "https://www.justice.gov/epstein/doj-disclosures",
+    "https://www.justice.gov/epstein/foia"
+  ],
+  "auto_start": false,
+  "start_minimized": false
+}
