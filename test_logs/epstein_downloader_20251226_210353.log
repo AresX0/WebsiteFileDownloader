@@ -1,0 +1,3 @@
+2025-12-26 21:03:53,343 - INFO - Logger initialized.
+2025-12-26 21:03:53,343 - DEBUG - EpsteinFilesDownloader v1.0.0 started. Log file: C:\Path\test_logs\epstein_downloader_20251226_210353.log
+2025-12-26 21:03:53,506 - INFO - Startup confirmation dialog shown.

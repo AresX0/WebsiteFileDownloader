@@ -1,27 +1,13 @@
 # Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-env/
-.venv/
-venv/
-.Python
+*.py[cod]
 
-# Distribution / packaging
-build/
-dist/
-*.egg-info/
-
-# Logs
+# Local folders
 logs/
-*.log
+downloads/
 
-# OS files
-.DS_Store
-Thumbs.db
-
-# Local config
-config.json
+# Credentials (never commit)
 credentials.json
-queue_state.json
+
+# Pytest cache
+.pytest_cache/

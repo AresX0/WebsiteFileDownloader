@@ -151,10 +151,23 @@ def check_and_install(package, pip_name=None):
         print(f"Missing required package: {pip_name}. Installing...")
         subprocess.check_call(["python", "-m", "pip", "install", pip_name])
 
-# Check and install prerequisites
-check_and_install("playwright")
-check_and_install("requests")
-check_and_install("gdown")
+# Check and install prerequisites (skip if EPISTEIN_SKIP_INSTALL=1)
+if os.environ.get('EPISTEIN_SKIP_INSTALL', '0') != '1':
+    check_and_install("playwright")
+    check_and_install("requests")
+    check_and_install("gdown")
+    # Ensure Playwright browsers are installed (best-effort)
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            try:
+                p.chromium.launch(headless=True).close()
+            except Exception:
+                subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium"])
+    except Exception as e:
+        logger.warning(f"Playwright browser check failed or Playwright not available: {e}")
+else:
+    logger.info("Skipping package installation due to EPISTEIN_SKIP_INSTALL=1")
 
 def download_drive_folder_api(folder_id, output_dir, credentials_path):
     SCOPES = ['https://www.googleapis.com/auth/drive.readonly']

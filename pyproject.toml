@@ -1,0 +1,3 @@
+[tool.ruff]
+line-length = 88
+exclude = ["build","dist",".venv","backups","BackupGui.py","epsstein_downloader_gui (1).py","epstein_downloader_gui1.0.py","epstein_downloader_gui1.1.py","epsstein_downloader_gui_1_2.py"]
