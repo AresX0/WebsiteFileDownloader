@@ -339,8 +339,17 @@ class DownloaderGUI:
                     else:
                         self.root.after(0, lambda: messagebox.showinfo("Up to Date", f"You are running the latest version: {__version__}"))
                 else:
-                    self.root.after(0, lambda: messagebox.showwarning("Update Check Failed", "Could not check for updates."))
+                    # Provide a clearer message including HTTP status for troubleshooting
+                    try:
+                        snippet = r.text.strip()[:200]
+                    except Exception:
+                        snippet = ''
+                    self.root.after(0, lambda: messagebox.showwarning(
+                        "Update Check Failed",
+                        f"Could not check for updates (HTTP {r.status_code}).\nURL: {url}\n{snippet}"
+                    ))
             except Exception as e:
+                # Surface exception details to help debugging network/SSL issues
                 self.root.after(0, lambda: messagebox.showwarning("Update Check Error", f"Error checking for updates: {e}"))
         threading.Thread(target=do_check, daemon=True).start()
 
@@ -1225,12 +1234,18 @@ class DownloaderGUI:
                 self.root.after(0, lambda: messagebox.showerror("Validate Credentials", "No credentials.json file set or file does not exist."))
                 return
             try:
+                # Load service account credentials with a Drive scope and attempt a refresh.
+                # Checking `.valid` without refreshing is unreliable for service account files.
                 from google.oauth2 import service_account
-                creds = service_account.Credentials.from_service_account_file(path)
-                if creds and creds.valid:
+                from google.auth.transport.requests import Request
+                scopes = ['https://www.googleapis.com/auth/drive.readonly']
+                creds = service_account.Credentials.from_service_account_file(path, scopes=scopes)
+                req = Request()
+                try:
+                    creds.refresh(req)
                     self.root.after(0, lambda: messagebox.showinfo("Validate Credentials", "Credentials are valid."))
-                else:
-                    self.root.after(0, lambda: messagebox.showerror("Validate Credentials", "Credentials file is invalid."))
+                except Exception as e:
+                    self.root.after(0, lambda: messagebox.showerror("Validate Credentials", f"Credentials validation failed: {e}"))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("Validate Credentials", f"Credentials validation failed: {e}"))
         threading.Thread(target=do_validate, daemon=True).start()
