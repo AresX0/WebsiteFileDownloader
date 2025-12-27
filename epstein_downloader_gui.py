@@ -1,4 +1,4 @@
-
+﻿
 # EpsteinFilesDownloader v1.0.0
 # (C) 2025 - Refactored for clarity, maintainability, and efficiency
 
@@ -161,20 +161,32 @@ class DownloaderGUI:
         self.concurrent_downloads = tk.IntVar(value=3)
         self.urls = []
         self.default_urls = [
-            "https://a.com",
-            "https://b.com"
+        "https://www.justice.gov/epstein/foia",
+        "https://www.justice.gov/epstein/court-records",
+        "https://oversight.house.gov/release/oversight-committee-releases-epstein-records-provided-by-the-department-of-justice/",
+        "https://www.justice.gov/epstein/doj-disclosures",
+        "https://drive.google.com/drive/folders/1TrGxDGQLDLZu1vvvZDBAh-e7wN3y6Hoz?usp=sharing",
         ]
-        self.queue_state_path = os.path.join(os.getcwd(), "queue_state.json")
-        self.config_path = os.path.join(os.getcwd(), "config.json")
+        self.queue_state_path = os.path.join(os.path.dirname(__file__), "queue_state.json")
+        self.config_path = os.path.join(os.path.dirname(__file__), "config.json")
         self.status = tk.StringVar(value="Ready")
         self.speed_eta_var = tk.StringVar(value="Speed: --  ETA: --")
         self.error_log_path = os.path.join(self.log_dir, "error.log")
         self.log_file = os.path.join(self.log_dir, f"epstein_downloader_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
         import threading
         self._pause_event = threading.Event()
+        self._pause_event.set()  # Start in 'running' state; clear() will pause
         self._is_paused = False
+        # Image cache to keep PhotoImage refs
+        self._images = {}
         self.downloaded_json = tk.StringVar(value="")
         self.logger = logging.getLogger("EpsteinFilesDownloader")
+        # Ensure asset placeholders exist (create any missing or corrupt images)
+        try:
+            self.ensure_assets_present()
+        except Exception:
+            # Ensure asset generation failures do not block GUI startup
+            pass
         self.logger.setLevel(logging.DEBUG)
         if self.logger.hasHandlers():
             self.logger.handlers.clear()
@@ -203,21 +215,24 @@ class DownloaderGUI:
         self.config = self.load_config() if hasattr(self, 'load_config') else {}
         # Option for gdown fallback (must be after self.config is loaded)
         self.use_gdown_fallback = tk.BooleanVar(value=self.config.get("use_gdown_fallback", False))
+        # Load persisted settings into UI
+        try:
+            dl = self.config.get("download_dir", "")
+            if dl:
+                self.base_dir.set(dl)
+            self.concurrent_downloads.set(int(self.config.get("concurrent_downloads", self.concurrent_downloads.get())))
+            lg = self.config.get("log_dir", "")
+            if lg:
+                self.log_dir = lg
+            cred = self.config.get("credentials_path", "")
+            self.credentials_path = cred if cred else None
+            # Advanced flags
+            self.auto_start = bool(self.config.get("auto_start", False))
+            self.start_minimized = bool(self.config.get("start_minimized", False))
+        except Exception:
+            pass
         self.restore_queue_state() if hasattr(self, 'restore_queue_state') else None
-        # Override defaults if config exists
-        if self.config.get("download_dir"):
-            self.base_dir.set(self.config["download_dir"])
-        if self.config.get("concurrent_downloads"):
-            try:
-                self.concurrent_downloads.set(int(self.config["concurrent_downloads"]))
-            except Exception:
-                pass
-        if self.config.get("log_dir"):
-            self.log_dir = self.config["log_dir"]
-        if self.config.get("credentials_path"):
-            self.credentials_path = self.config["credentials_path"]
-        else:
-            self.credentials_path = None
+
         os.makedirs(self.log_dir, exist_ok=True)
         self.error_log_path = os.path.join(self.log_dir, "error.log")
         self.setup_logger(self.log_dir) if hasattr(self, 'setup_logger') else None
@@ -226,7 +241,35 @@ class DownloaderGUI:
         self.create_widgets() if hasattr(self, 'create_widgets') else None
         self.create_log_panel()
         self.setup_drag_and_drop() if hasattr(self, 'setup_drag_and_drop') else None
+        # Add Cancel Scan command to Tools menu if present
+        try:
+            menubar = self.root.nametowidget(self.root['menu'])
+            tools_menu = None
+            for i in range(menubar.index('end')+1):
+                label = menubar.entrycget(i, 'label')
+                if label == 'Tools':
+                    tools_menu = menubar.entrycget(i, 'menu')
+                    break
+            if tools_menu:
+                tools = self.root.nametowidget(tools_menu)
+                tools.add_separator()
+                tools.add_command(label='Cancel Scan', command=self.cancel_scan)
+        except Exception:
+            pass
         self.root.protocol("WM_DELETE_WINDOW", self.on_close) if hasattr(self, 'on_close') else None
+        # Apply auto-start on init only if explicitly configured
+        try:
+            # Do not auto-start downloads while running under pytest
+            if bool(self.config.get("auto_start", False)) and os.environ.get('PYTEST_CURRENT_TEST') is None:
+                if bool(self.config.get("start_minimized", False)):
+                    try:
+                        self.root.iconify()
+                    except Exception:
+                        pass
+                # Start downloads in background
+                self.start_download_all_thread()
+        except Exception:
+            self.logger.debug("No auto-start applied (either not configured or failed).")
 
     def open_selected_url_in_browser(self):
         selection = self.url_listbox.curselection()
@@ -316,6 +359,25 @@ class DownloaderGUI:
             if not self.log_panel.winfo_ismapped():
                 self.log_panel.grid(row=99, column=0, columnspan=4, sticky='ew', padx=4, pady=2)
                 self.log_panel_visible = True
+        # Ensure action buttons share consistent widths and are large enough to contain their text
+        try:
+            labels = [
+                self.download_btn['text'], self.pause_btn['text'], self.resume_btn['text'],
+                self.schedule_btn['text'], self.json_btn['text'], self.skipped_btn['text'],
+                self.stop_scan_btn['text'], getattr(self, 'enable_scan_btn', tk.Button())['text'] if hasattr(self, 'enable_scan_btn') else 'Enable Scans'
+            ]
+            max_len = max(len(l) for l in labels)
+            # Add padding so icons and text fit comfortably
+            width = max(20, max_len + 6)
+            for btn in (self.download_btn, self.pause_btn, self.resume_btn, self.schedule_btn, self.json_btn, self.skipped_btn, getattr(self, 'stop_scan_btn', None), getattr(self, 'enable_scan_btn', None)):
+                if btn is None:
+                    continue
+                try:
+                    btn.config(width=width)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def toggle_log_panel(self):
         if hasattr(self, 'log_panel'):
@@ -356,7 +418,6 @@ class DownloaderGUI:
             self.url_menu.tk_popup(event.x_root, event.y_root)
         finally:
             self.url_menu.grab_release()
-            self.logger.handlers.clear()
         fh = logging.FileHandler(self.log_file, encoding='utf-8')
         fh.setLevel(logging.DEBUG)
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -371,7 +432,11 @@ class DownloaderGUI:
         self.restore_queue_state()
         # Override defaults if config exists
         if self.config.get("download_dir"):
-            self.base_dir = tk.StringVar(value=r'C:\Downloads\Epstein')
+            # restore previously saved download folder
+            try:
+                self.base_dir.set(self.config["download_dir"])
+            except Exception:
+                pass
         if self.config.get("concurrent_downloads"):
             try:
                 self.concurrent_downloads.set(int(self.config["concurrent_downloads"]))
@@ -416,15 +481,18 @@ class DownloaderGUI:
                 with open(self.queue_state_path, "r", encoding="utf-8") as f:
                     state = json.load(f)
                 loaded_urls = state.get("urls", [])
-                # If all loaded URLs are placeholders or the list is empty, use defaults
-                if not loaded_urls or all(is_placeholder_url(u) for u in loaded_urls):
-                    self.urls = list(self.default_urls)
-                else:
+                # Use saved URLs if present, otherwise fall back to defaults
+                if loaded_urls:
                     self.urls = loaded_urls
+                else:
+                    self.urls = list(self.default_urls)
+                # Restore processed_count if present
+                self.processed_count = int(state.get("processed_count", 0))
+                self.logger.info("Queue state restored.")
             else:
                 self.urls = list(self.default_urls)
-                self.processed_count = state.get("processed_count", 0)
-                self.logger.info("Queue state restored.")
+                self.processed_count = 0
+                self.logger.info("Queue state restored (defaults used).")
         except Exception as e:
             self.logger.error(f"Failed to restore queue state: {e}")
 
@@ -530,21 +598,44 @@ class DownloaderGUI:
             return {}
 
     def save_config(self):
-        self.config["download_dir"] = self.base_dir.get()
-        self.config["log_dir"] = getattr(self, "log_dir", os.path.join(os.getcwd(), "logs"))
-        self.config["concurrent_downloads"] = self.concurrent_downloads.get()
-        # Save credentials_path if set
-        if hasattr(self, "credentials_path") and self.credentials_path:
-            self.config["credentials_path"] = self.credentials_path
-        elif "credentials_path" in self.config:
-            del self.config["credentials_path"]
-        with open(self.config_path, "w", encoding="utf-8") as f:
-            json.dump(self.config, f, indent=2)
+        """Persist current configuration to disk."""
+        # Always write explicit keys so they persist (even empty strings allow UI to show state)
+        try:
+            self.config["download_dir"] = self.base_dir.get()
+            self.config["log_dir"] = getattr(self, "log_dir", os.path.join(os.path.dirname(__file__), "logs"))
+            self.config["concurrent_downloads"] = int(self.concurrent_downloads.get())
+            # credentials_path: store empty string if not provided to make persistence predictable
+            self.config["credentials_path"] = self.credentials_path if getattr(self, 'credentials_path', None) else ""
+            # Advanced flags
+            self.config["auto_start"] = bool(getattr(self, 'auto_start_var', tk.BooleanVar(value=False)).get())
+            self.config["start_minimized"] = bool(getattr(self, 'start_minimized_var', tk.BooleanVar(value=False)).get())
+            # gdown fallback flag
+            if hasattr(self, 'use_gdown_fallback'):
+                self.config["use_gdown_fallback"] = bool(self.use_gdown_fallback.get())
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(self.config, f, indent=2)
+            self.logger.info(f"Configuration saved to {self.config_path}")
+        except Exception as e:
+            self.logger.error(f"Failed to save configuration: {e}", exc_info=True)
 
     def restore_defaults(self):
         self.base_dir.set(r'C:\Temp\Epstein')
         self.log_dir = os.path.join(os.getcwd(), "logs")
         os.makedirs(self.log_dir, exist_ok=True)
+        # Reset URLs to application defaults and refresh the UI listbox
+        self.urls = list(self.default_urls)
+        try:
+            self.url_listbox.delete(0, tk.END)
+            for url in self.urls:
+                self.url_listbox.insert(tk.END, url)
+        except Exception:
+            # If the listbox isn't available (early call), ignore UI refresh
+            pass
+        # Persist queue state so defaults are saved immediately
+        try:
+            self.save_queue_state()
+        except Exception:
+            pass
         self.save_config()
         self.setup_logger(self.log_dir)
         messagebox.showinfo("Defaults Restored", "Settings have been restored to defaults.")
@@ -563,10 +654,19 @@ class DownloaderGUI:
         file_menu.add_command(label="Export Settings...", command=self.export_settings)
         file_menu.add_command(label="Import Settings...", command=self.import_settings)
         file_menu.add_separator()
-        file_menu.add_command(label="Settings Dialog...", command=self.open_settings_dialog)
-        file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.root.quit)
         menubar.add_cascade(label="File", menu=file_menu)
+
+        # Settings menu (moved out of File)
+        settings_menu = tk.Menu(menubar, tearoff=0)
+        settings_menu.add_command(label="Advanced Settings...", command=self.open_settings_dialog)
+        settings_menu.add_separator()
+        settings_menu.add_command(label="Import Settings...", command=self.import_settings)
+        settings_menu.add_command(label="Export Settings...", command=self.export_settings)
+        settings_menu.add_separator()
+        settings_menu.add_command(label="Save Settings as Default", command=self.save_config)
+        settings_menu.add_command(label="Restore Defaults", command=self.restore_defaults)
+        menubar.add_cascade(label="Settings", menu=settings_menu)
 
         # View menu
         view_menu = tk.Menu(menubar, tearoff=0)
@@ -641,6 +741,176 @@ class DownloaderGUI:
             except Exception as e:
                 self.log_error(e, "Export Settings")
 
+    # --- Asset / UI Helpers ---
+    def create_placeholder_asset(self, path: str, name: str):
+        """Create a small, polished placeholder PNG for `name` using Pillow drawing primitives.
+        Draws a colored rounded background and a simple vector symbol (triangle, bars, arrow, etc.)."""
+        try:
+            from PIL import Image, ImageDraw
+            # standard icon size (square)
+            size_px = 24
+            size = (size_px, size_px)
+            im = Image.new('RGBA', size, (0, 0, 0, 0))
+            draw = ImageDraw.Draw(im)
+            # Symbol mapping (symbol color will vary; background is consistent)
+            symbol_map = {
+                'start': {'color': (255, 255, 255, 255), 'type': 'triangle'},
+                'pause': {'color': (255, 255, 255, 255), 'type': 'bars'},
+                'resume': {'color': (255, 255, 255, 255), 'type': 'triangle'},
+                'schedule': {'color': (255, 255, 255, 255), 'type': 'clock'},
+                'json': {'color': (255, 255, 255, 255), 'type': 'braces'},
+                'skipped': {'color': (255, 255, 255, 255), 'type': 'x'},
+                'stop': {'color': (255, 255, 255, 255), 'type': 'square'},
+                'download': {'color': (255, 255, 255, 255), 'type': 'downarrow'},
+            }
+            cfg = symbol_map.get(name, {'color': (255,255,255,255), 'type': 'letter'})
+            symbol_color = cfg['color']
+            # Consistent neutral background for all icons
+            bg = (240, 240, 240, 255)
+            # Draw rounded rectangle background (smaller corner radius)
+            r = max(3, size_px // 8)
+            draw.rounded_rectangle((0, 0, size[0], size[1]), radius=r, fill=bg)
+            symbol_type = cfg['type']
+            # Draw symbol centered
+            cx, cy = size[0] // 2, size[1] // 2
+            if symbol_type == 'triangle':
+                # Play triangle pointing right
+                pts = [(cx - 5, cy - 6), (cx - 5, cy + 6), (cx + 7, cy)]
+                draw.polygon(pts, fill=symbol_color)
+            elif symbol_type == 'bars':
+                # Two vertical bars
+                w = 3
+                h = 12
+                draw.rectangle((cx - 6 - w//2, cy - h//2, cx - 6 + w//2, cy + h//2), fill=symbol_color)
+                draw.rectangle((cx + 6 - w//2, cy - h//2, cx + 6 + w//2, cy + h//2), fill=symbol_color)
+            elif symbol_type == 'clock':
+                draw.ellipse((cx - 6, cy - 6, cx + 6, cy + 6), outline=symbol_color, width=2)
+                draw.line((cx, cy, cx, cy - 4), fill=symbol_color, width=2)
+                draw.line((cx, cy, cx + 3, cy), fill=symbol_color, width=2)
+            elif symbol_type == 'braces':
+                # Draw curly braces as simple lines
+                draw.line((cx - 8, cy - 8, cx - 5, cy - 5), fill=symbol_color, width=2)
+                draw.line((cx - 5, cy - 5, cx - 8, cy - 2), fill=symbol_color, width=2)
+                draw.line((cx + 8, cy - 8, cx + 5, cy - 5), fill=symbol_color, width=2)
+                draw.line((cx + 5, cy - 5, cx + 8, cy - 2), fill=symbol_color, width=2)
+                draw.line((cx - 8, cy + 8, cx - 5, cy + 5), fill=symbol_color, width=2)
+                draw.line((cx - 5, cy + 5, cx - 8, cy + 2), fill=symbol_color, width=2)
+                draw.line((cx + 8, cy + 8, cx + 5, cy + 5), fill=symbol_color, width=2)
+                draw.line((cx + 5, cy + 5, cx + 8, cy + 2), fill=symbol_color, width=2)
+            elif symbol_type == 'x':
+                draw.line((cx - 6, cy - 6, cx + 6, cy + 6), fill=symbol_color, width=3)
+                draw.line((cx - 6, cy + 6, cx + 6, cy - 6), fill=symbol_color, width=3)
+            elif symbol_type == 'downarrow':
+                draw.polygon([(cx, cy + 7), (cx - 6, cy), (cx - 2, cy), (cx - 2, cy - 6), (cx + 2, cy - 6), (cx + 2, cy), (cx + 6, cy)], fill=symbol_color)
+            elif symbol_type == 'square':
+                # Draw a centered square to represent 'stop'
+                s = 10
+                draw.rectangle((cx - s//2, cy - s//2, cx + s//2, cy + s//2), fill=symbol_color)
+            else:
+                # Letter fallback
+                from PIL import ImageFont
+                try:
+                    font = ImageFont.truetype('arial.ttf', 14)
+                except Exception:
+                    font = ImageFont.load_default()
+                letter = name[0].upper()
+                w, h = draw.textsize(letter, font=font)
+                draw.text((cx - w//2, cy - h//2), letter, fill=symbol_color, font=font)
+            im.save(path, format='PNG')
+            try:
+                self.logger.info(f"Created placeholder asset: {path}")
+            except Exception:
+                pass
+            return True
+        except Exception as e:
+            try:
+                self.logger.warning(f"Failed to create placeholder asset {path}: {e}")
+            except Exception:
+                pass
+            return False
+
+    def ensure_assets_present(self):
+        """Create or repair any expected assets (small placeholder icons) in the script's assets/ folder."""
+        expected = ["start", "pause", "resume", "schedule", "json", "skipped", "download", "stop"]
+        assets_dir = os.path.join(os.path.dirname(__file__), 'assets')
+        os.makedirs(assets_dir, exist_ok=True)
+        for name in expected:
+            p = os.path.join(assets_dir, name + '.png')
+            need_create = False
+            if not os.path.exists(p):
+                need_create = True
+            else:
+                try:
+                    # Empty files should be replaced
+                    if os.path.getsize(p) == 0:
+                        need_create = True
+                    else:
+                        from PIL import Image
+                        try:
+                            im = Image.open(p)
+                            im.verify()
+                        except Exception:
+                            need_create = True
+                except Exception:
+                    need_create = True
+            if need_create:
+                # Try to create placeholder
+                self.create_placeholder_asset(p, name)
+        # Normalize sizes after ensuring presence
+        try:
+            self.ensure_asset_sizes(target_px=24)
+        except Exception:
+            pass
+
+    def show_toast(self, message, duration=1500):
+        """Show a transient non-blocking 'toast' message near the bottom-right of the main window."""
+        try:
+            toast = tk.Toplevel(self.root)
+            toast.overrideredirect(True)
+            toast.attributes('-topmost', True)
+            # Use simple label - ttk widgets may be styled; use tk.Label for basic bg control
+            lbl = tk.Label(toast, text=message, bg='#333333', fg='#ffffff', padx=10, pady=6)
+            lbl.pack()
+            self.root.update_idletasks()
+            # Position toast at bottom-right with a margin
+            x = self.root.winfo_rootx() + max(12, self.root.winfo_width() - toast.winfo_reqwidth() - 12)
+            y = self.root.winfo_rooty() + max(12, self.root.winfo_height() - toast.winfo_reqheight() - 40)
+            toast.geometry(f"+{x}+{y}")
+            toast.after(duration, lambda: (toast.destroy() if toast.winfo_exists() else None))
+        except Exception as e:
+            try:
+                self.logger.debug(f"Failed to show toast: {e}")
+            except Exception:
+                pass
+
+    def ensure_asset_sizes(self, target_px=24):
+        """Resize existing assets to target_px x target_px preserving aspect ratio and padding to square."""
+        try:
+            from PIL import Image
+            assets_dir = os.path.join(os.path.dirname(__file__), 'assets')
+            for fname in os.listdir(assets_dir):
+                if not fname.lower().endswith('.png'):
+                    continue
+                path = os.path.join(assets_dir, fname)
+                try:
+                    im = Image.open(path).convert('RGBA')
+                    if im.size != (target_px, target_px):
+                        # Resize and pad to square
+                        im.thumbnail((target_px, target_px), Image.LANCZOS)
+                        new_im = Image.new('RGBA', (target_px, target_px), (0,0,0,0))
+                        x = (target_px - im.width)//2
+                        y = (target_px - im.height)//2
+                        new_im.paste(im, (x,y), im)
+                        new_im.save(path, format='PNG')
+                        try:
+                            self.logger.info(f"Resized asset {fname} to {target_px}x{target_px}")
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def import_settings(self):
         """Import settings from a user-chosen JSON file."""
         file_path = filedialog.askopenfilename(
@@ -663,6 +933,17 @@ class DownloaderGUI:
                     self.credentials_path = imported["credentials_path"]
                 self.save_config()
                 self.setup_logger(self.log_dir)
+                # Apply imported auto-start flags if present
+                if self.config.get("auto_start", False):
+                    try:
+                        if self.config.get("start_minimized", False):
+                            try:
+                                self.root.iconify()
+                            except Exception:
+                                pass
+                        self.start_download_all_thread()
+                    except Exception:
+                        self.logger.exception("Failed to apply imported auto-start settings.")
                 messagebox.showinfo("Import Settings", f"Settings imported from: {file_path}")
             except Exception as e:
                 self.log_error(e, "Import Settings")
@@ -672,7 +953,7 @@ class DownloaderGUI:
     def open_settings_dialog(self):
         """Open a dialog to view and edit all key settings, grouped in tabs."""
         win = tk.Toplevel(self.root)
-        win.title("Settings")
+        win.title("Advanced Settings")
         win.geometry("650x480")
 
         notebook = ttk.Notebook(win)
@@ -703,7 +984,15 @@ class DownloaderGUI:
         concurrency_var = tk.IntVar(value=self.concurrent_downloads.get())
         concurrency_spin = ttk.Spinbox(general_tab, from_=1, to=32, textvariable=concurrency_var, width=8, increment=1)
         concurrency_spin.grid(row=3, column=1, sticky="w", padx=10, pady=10)
-
+        # Auto-start and Start minimized options
+        self.auto_start_var = tk.BooleanVar(value=self.config.get("auto_start", False))
+        self.start_minimized_var = tk.BooleanVar(value=self.config.get("start_minimized", False))
+        auto_chk = ttk.Checkbutton(general_tab, text="Auto-start downloads on launch", variable=self.auto_start_var)
+        auto_chk.grid(row=4, column=0, columnspan=2, sticky="w", padx=10, pady=(8, 2))
+        self.add_tooltip(auto_chk, "If enabled, downloads will start automatically when the app launches.")
+        min_chk = ttk.Checkbutton(general_tab, text="Start downloads minimized", variable=self.start_minimized_var)
+        min_chk.grid(row=5, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
+        self.add_tooltip(min_chk, "If enabled, the window will be minimized when auto-starting downloads.")
         # --- Network Tab ---
         network_tab = ttk.Frame(notebook)
         notebook.add(network_tab, text="Network")
@@ -744,17 +1033,50 @@ class DownloaderGUI:
             self.concurrent_downloads.set(concurrency_var.get())
             self.config["proxy"] = proxy_var.get()
             self.config["speed_limit_kbps"] = speed_var.get()
-            if self.config.get('show_advanced', False):
-                self.config["use_gdown_fallback"] = self.use_gdown_fallback.get()
+            # New advanced options
+            self.config["auto_start"] = bool(self.auto_start_var.get())
+            self.config["start_minimized"] = bool(self.start_minimized_var.get())
+            # Persist gdown fallback setting (always save current checkbox state)
+            self.config["use_gdown_fallback"] = bool(self.use_gdown_fallback.get())
             # Theme
             new_dark = (theme_var.get() == "Dark")
             if new_dark != self.dark_mode:
                 self.dark_mode = new_dark
                 self.set_theme('clam' if self.dark_mode else 'default')
             self.save_config()
+            try:
+                self.logger.info("Settings saved via Advanced Settings.")
+            except Exception:
+                pass
             self.setup_logger(self.log_dir)
             win.destroy()
-            messagebox.showinfo("Settings", "Settings updated.")
+            # Small transient confirmation (non-blocking)
+            try:
+                self.show_toast("Settings saved", duration=1400)
+            except Exception:
+                # Fallback to modal dialog if toast fails
+                try:
+                    messagebox.showinfo("Settings", "Settings updated.")
+                except Exception:
+                    pass
+            # Apply auto-start if requested
+            try:
+                if self.config.get("auto_start", False):
+                    # If requested, minimize first
+                    if self.config.get("start_minimized", False):
+                        try:
+                            self.root.iconify()
+                        except Exception:
+                            pass
+                    # Start downloads in background
+                    self.start_download_all_thread()
+            except Exception:
+                self.logger.exception("Failed to apply auto-start settings after saving.")
+            # Persist config to disk
+            try:
+                self.save_config()
+            except Exception:
+                self.logger.warning("Failed to save config after settings change.")
 
         save_btn = ttk.Button(win, text="Save", command=save_and_close)
         save_btn.pack(pady=12)
@@ -773,19 +1095,79 @@ class DownloaderGUI:
         self.add_tooltip(save_btn, "Save changes to settings.")
 
     def force_full_hash_rescan(self):
-        """Delete the hash cache file so the next scan will re-hash all files."""
+        """Delete the hash cache file and meta so the next scan will re-hash all files."""
         import os
         base_dir = self.base_dir.get()
         hash_file_path = os.path.join(base_dir, 'existing_hashes.txt')
         cache_file = hash_file_path + ".cache.json"
-        if os.path.exists(cache_file):
-            try:
+        meta_file = hash_file_path + ".meta.json"
+        try:
+            removed = False
+            if os.path.exists(cache_file):
                 os.remove(cache_file)
-                messagebox.showinfo("Hash Rescan", "Hash cache cleared. Next scan will re-hash all files.")
-            except Exception as e:
-                messagebox.showerror("Hash Rescan", f"Failed to clear hash cache: {e}")
+                removed = True
+            if os.path.exists(meta_file):
+                os.remove(meta_file)
+                removed = True
+            # Set a flag so any running session knows to force a rescan on next download
+            self._force_rescan = True
+            if removed:
+                messagebox.showinfo("Hash Rescan", "Hash cache and metadata cleared. Next scan will re-hash all files.")
+            else:
+                messagebox.showinfo("Hash Rescan", "No hash cache or metadata found. Next scan will re-hash all files.")
+        except Exception as e:
+            messagebox.showerror("Hash Rescan", f"Failed to clear hash cache: {e}")
+
+    def cancel_scan(self):
+        """Request cancellation of a running existing-file scan."""
+        if getattr(self, '_scanning', False):
+            self._cancel_scan = True
+            try:
+                self.logger.info('User requested scan cancellation.')
+            except Exception:
+                pass
+            self.thread_safe_status('Cancelling scan...')
         else:
-            messagebox.showinfo("Hash Rescan", "No hash cache file found. Next scan will re-hash all files.")
+            self.thread_safe_status('No scan in progress.')
+
+    def stop_scans(self):
+        """Disable future scans and cancel any currently running scan."""
+        self._scans_disabled = True
+        # Cancel any running scan
+        if getattr(self, '_scanning', False):
+            self._cancel_scan = True
+        try:
+            self.logger.info('User disabled scanning.')
+        except Exception:
+            pass
+        self.thread_safe_status('Scanning disabled by user. Scans will remain disabled until re-enabled.')
+        # Update UI buttons if available
+        try:
+            self.stop_scan_btn.config(state='disabled')
+        except Exception:
+            pass
+        try:
+            self.enable_scan_btn.config(state='normal')
+        except Exception:
+            pass
+
+    def enable_scans(self):
+        """Re-enable scanning for existing files."""
+        self._scans_disabled = False
+        try:
+            self.logger.info('User enabled scanning.')
+        except Exception:
+            pass
+        self.thread_safe_status('Scanning enabled. Full scans will run as scheduled.')
+        try:
+            self.stop_scan_btn.config(state='normal')
+        except Exception:
+            pass
+        try:
+            self.enable_scan_btn.config(state='disabled')
+        except Exception:
+            pass
+
     def pick_credentials_file(self):
         file_path = filedialog.askopenfilename(
             title="Select Google Drive credentials.json",
@@ -899,7 +1281,11 @@ class DownloaderGUI:
         folder = filedialog.askdirectory(title="Select Download Folder")
         if folder:
             self.base_dir.set(folder)
-            self.save_config()
+            # Persist immediately so next launch remembers this folder
+            try:
+                self.save_config()
+            except Exception:
+                self.logger.warning("Failed to save config after pick_download_folder.")
 
     def pick_log_folder(self):
         folder = filedialog.askdirectory(title="Select Log Folder")
@@ -1421,31 +1807,54 @@ class DownloaderGUI:
         url_section.columnconfigure(1, weight=1)
         url_section.configure(labelanchor='n')
         self.url_listbox = tk.Listbox(url_section, height=6, width=80, font=("Segoe UI", 11))
-        self.url_listbox.grid(row=0, column=0, columnspan=3, sticky="ew", padx=(0, 8), pady=5)
+        # Listbox spans the full width so it sits above both left controls and right-side area
+        self.url_listbox.grid(row=0, column=0, columnspan=4, sticky="ew", padx=(0, 8), pady=5)
         self.url_listbox.delete(0, tk.END)
         for url in self.urls:
             self.url_listbox.insert(tk.END, url)
         self.add_tooltip(self.url_listbox, "List of URLs to download. Select to remove or view details.")
         self.setup_url_listbox_context_menu()
+        # URL entry and Add button span the full width (entry on left, Add on right)
         self.url_entry = ttk.Entry(url_section, width=60, font=("Segoe UI", 11))
-        self.url_entry.grid(row=1, column=0, sticky="ew", pady=5)
+        self.url_entry.grid(row=1, column=0, columnspan=3, sticky="ew", pady=5)
         add_url_btn = ttk.Button(url_section, text="Add URL", command=self.add_url)
-        add_url_btn.grid(row=1, column=1, sticky="w", padx=(8, 0), pady=5)
+        add_url_btn.grid(row=1, column=3, sticky="w", padx=(8, 0), pady=5)
         self.add_tooltip(add_url_btn, "Add a new download URL")
         self.add_tooltip(self.url_entry, "Paste a new URL and click 'Add URL'")
 
-        remove_url_btn = ttk.Button(url_section, text="Remove URL", command=self.remove_url)
-        remove_url_btn.grid(row=2, column=0, sticky="ew", pady=5)
-        self.add_tooltip(remove_url_btn, "Remove the selected URL from the list")
-        move_up_btn = ttk.Button(url_section, text="Move Up", command=self.move_url_up)
-        move_up_btn.grid(row=2, column=1, sticky="ew", padx=(8, 0), pady=5)
-        self.add_tooltip(move_up_btn, "Move the selected URL up in the queue")
-        move_down_btn = ttk.Button(url_section, text="Move Down", command=self.move_url_down)
-        move_down_btn.grid(row=2, column=2, sticky="ew", padx=(8, 0), pady=5)
-        self.add_tooltip(move_down_btn, "Move the selected URL down in the queue")
-        clear_completed_btn = ttk.Button(url_section, text="Clear Completed", command=self.clear_completed_urls)
-        clear_completed_btn.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(5, 0))
-        self.add_tooltip(clear_completed_btn, "Remove all completed (already processed) URLs from the queue")
+        # URL control buttons (exposed on self for tests/automation)
+        # Create a left-aligned button-frame under the list; keep buttons on the left side
+        url_btns_frame = ttk.Frame(url_section)
+        url_btns_frame.grid(row=2, column=0, columnspan=3, sticky="w", padx=(0,0), pady=5)
+
+        self.remove_url_btn = ttk.Button(url_btns_frame, text="Remove URL", command=self.remove_url)
+        self.remove_url_btn.pack(side='left', padx=(0,6))
+        self.add_tooltip(self.remove_url_btn, "Remove the selected URL from the list")
+
+        self.move_up_btn = ttk.Button(url_btns_frame, text="Move Up", command=self.move_url_up)
+        self.move_up_btn.pack(side='left', padx=(0,6))
+        self.add_tooltip(self.move_up_btn, "Move the selected URL up in the queue")
+
+        self.move_down_btn = ttk.Button(url_btns_frame, text="Move Down", command=self.move_url_down)
+        self.move_down_btn.pack(side='left', padx=(0,6))
+        self.add_tooltip(self.move_down_btn, "Move the selected URL down in the queue")
+
+        self.clear_completed_btn = ttk.Button(url_btns_frame, text="Clear Completed", command=self.clear_completed_urls)
+        self.clear_completed_btn.pack(side='left')
+        self.add_tooltip(self.clear_completed_btn, "Remove all completed (already processed) URLs from the queue")
+
+        # Make these buttons consistent widths to improve visual layout
+        try:
+            url_labels = [self.remove_url_btn['text'], self.move_up_btn['text'], self.move_down_btn['text'], self.clear_completed_btn['text']]
+            url_max = max(len(t) for t in url_labels)
+            url_width = max(12, url_max + 4)
+            for b in (self.remove_url_btn, self.move_up_btn, self.move_down_btn, self.clear_completed_btn):
+                try:
+                    b.config(width=url_width)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         # --- Download Folder Group ---
         dir_section = ttk.LabelFrame(self.frame, text="Download Folder", padding=(15, 10))
@@ -1454,33 +1863,158 @@ class DownloaderGUI:
         dir_section.configure(labelanchor='n')
         dir_entry = ttk.Entry(dir_section, textvariable=self.base_dir, width=60, font=("Segoe UI", 11))
         dir_entry.grid(row=0, column=0, sticky="ew", pady=5)
-        dir_btn = ttk.Button(dir_section, text="Browse", command=self.browse_dir)
-        dir_btn.grid(row=0, column=1, sticky="w", padx=(8, 0), pady=5)
-        self.add_tooltip(dir_btn, "Choose the download destination folder")
+        # Expose directory browse button for testing/automation
+        self.dir_btn = ttk.Button(dir_section, text="Browse", command=self.browse_dir)
+        self.dir_btn.grid(row=0, column=1, sticky="w", padx=(8, 0), pady=5)
+        self.add_tooltip(self.dir_btn, "Choose the download destination folder")
         self.add_tooltip(dir_entry, "Edit or paste the download folder path")
+        # Ensure directory browse button has consistent width with URL controls
+        try:
+            self.dir_btn.config(width=url_width if 'url_width' in locals() else 14)
+        except Exception:
+            pass
 
         # --- Action Buttons Group ---
         action_section = ttk.LabelFrame(self.frame, text="Actions", padding=(15, 10))
         action_section.grid(row=4, column=0, columnspan=4, sticky="ew", padx=10, pady=(0, 15))
         action_section.configure(labelanchor='n')
-        self.download_btn = ttk.Button(action_section, text="▶ Start Download", command=self.start_download_all_thread)
+        # Small helper to load icons from assets and keep references
+        def load_icon(name):
+            # Prefer assets relative to this script, fall back to current working directory
+            possible_dirs = [os.path.join(os.path.dirname(__file__), 'assets'), os.path.join(os.getcwd(), 'assets')]
+            for d in possible_dirs:
+                for ext in (".png", ".gif", ".ico"):
+                    p = os.path.join(d, name + ext)
+                    if os.path.exists(p):
+                        # Prefer Pillow so we can normalise backgrounds to transparent
+                        try:
+                            from PIL import Image, ImageTk
+                            pil_img = Image.open(p).convert('RGBA')
+                            # If the image has a solid corner color, make that color transparent
+                            try:
+                                # Compute a representative background color from the image corners (5x5 area)
+                                w, h = pil_img.size
+                                samples = []
+                                # sample small boxes at each corner
+                                box = 5
+                                corners = [
+                                    (0, 0, min(box, w), min(box, h)),
+                                    (max(0, w-box), 0, w, min(box, h)),
+                                    (0, max(0, h-box), min(box, w), h),
+                                    (max(0, w-box), max(0, h-box), w, h),
+                                ]
+                                for cx1, cy1, cx2, cy2 in corners:
+                                    for px in range(cx1, cx2):
+                                        for py in range(cy1, cy2):
+                                            samples.append(pil_img.getpixel((px, py))[:3])
+                                if samples:
+                                    # median to be robust against noise
+                                    import statistics
+                                    bg_r = int(statistics.median([s[0] for s in samples]))
+                                    bg_g = int(statistics.median([s[1] for s in samples]))
+                                    bg_b = int(statistics.median([s[2] for s in samples]))
+                                    bg = (bg_r, bg_g, bg_b)
+                                    # Threshold for color distance — tuned to tolerate antialiasing
+                                    thresh = 60
+                                    def color_dist(c1, c2):
+                                        return ((c1[0]-c2[0])**2 + (c1[1]-c2[1])**2 + (c1[2]-c2[2])**2) ** 0.5
+                                    datas = list(pil_img.getdata())
+                                    new_data = []
+                                    for item in datas:
+                                        r, g, b, a = item
+                                        if a == 0:
+                                            new_data.append((r, g, b, a))
+                                            continue
+                                        if color_dist((r, g, b), bg) <= thresh:
+                                            # make fully transparent
+                                            new_data.append((r, g, b, 0))
+                                        else:
+                                            new_data.append((r, g, b, a))
+                                    pil_img.putdata(new_data)
+                            except Exception:
+                                pass
+                            # Convert icon to black-on-transparent: keep dark pixels, fade lighter ones
+                            try:
+                                datas = list(pil_img.getdata())
+                                new_data = []
+                                # luminance thresholds
+                                dark_max = 100
+                                fade = 80
+                                for item in datas:
+                                    r, g, b, a = item
+                                    # If fully transparent already, keep
+                                    if a == 0:
+                                        new_data.append((0, 0, 0, 0))
+                                        continue
+                                    lum = int(0.299 * r + 0.587 * g + 0.114 * b)
+                                    if lum <= dark_max:
+                                        # solid black
+                                        new_data.append((0, 0, 0, 255))
+                                    elif lum <= dark_max + fade:
+                                        # fade proportionally
+                                        alpha = int(255 * (1.0 - (lum - dark_max) / float(fade)))
+                                        if alpha < 8:
+                                            new_data.append((0, 0, 0, 0))
+                                        else:
+                                            new_data.append((0, 0, 0, alpha))
+                                    else:
+                                        new_data.append((0, 0, 0, 0))
+                                pil_img.putdata(new_data)
+                            except Exception:
+                                pass
+                            img = ImageTk.PhotoImage(pil_img, master=self.root)
+                            self._images[name] = img
+                            return img
+                        except Exception:
+                            # If Pillow isn't available or fails, fall back to Tk's PhotoImage
+                            try:
+                                img = tk.PhotoImage(master=self.root, file=p)
+                                self._images[name] = img
+                                return img
+                            except Exception:
+                                # Final fallback: neutral placeholder
+                                try:
+                                    placeholder = tk.PhotoImage(master=self.root, width=16, height=16)
+                                    placeholder.put(("#cccccc",), to=(0,0,16,16))
+                                    self._images[name] = placeholder
+                                    return placeholder
+                                except Exception:
+                                    continue
+            return None
+        start_icon = load_icon("start")
+        pause_icon = load_icon("pause")
+        resume_icon = load_icon("resume")
+        schedule_icon = load_icon("schedule")
+        json_icon = load_icon("json")
+        skipped_icon = load_icon("skipped")
+
+        self.download_btn = ttk.Button(action_section, text="Start Download", command=self.start_download_all_thread, image=start_icon, compound='left')
         self.download_btn.grid(row=0, column=0, pady=5, padx=(0, 8), sticky="ew")
         self.add_tooltip(self.download_btn, "Start downloading all files from the URLs above (runs in background, UI stays responsive)")
-        self.pause_btn = ttk.Button(action_section, text="⏸ Pause", command=self.pause_downloads)
+        self.pause_btn = ttk.Button(action_section, text="Pause", command=self.pause_downloads, image=pause_icon, compound='left')
         self.pause_btn.grid(row=0, column=1, pady=5, padx=(0, 8), sticky="ew")
         self.add_tooltip(self.pause_btn, "Pause all downloads in progress.")
-        self.resume_btn = ttk.Button(action_section, text="▶ Resume", command=self.resume_downloads, state='disabled')
+        self.resume_btn = ttk.Button(action_section, text="Resume", command=self.resume_downloads, state='disabled', image=resume_icon, compound='left')
         self.resume_btn.grid(row=0, column=2, pady=5, padx=(0, 8), sticky="ew")
         self.add_tooltip(self.resume_btn, "Resume paused downloads.")
-        self.schedule_btn = ttk.Button(action_section, text="⏰ Schedule", command=self.open_schedule_window)
+        self.schedule_btn = ttk.Button(action_section, text="Schedule", command=self.open_schedule_window, image=schedule_icon, compound='left')
         self.schedule_btn.grid(row=0, column=3, pady=5, padx=(0, 8), sticky="ew")
         self.add_tooltip(self.schedule_btn, "Schedule downloads for specific days and times")
-        self.json_btn = ttk.Button(action_section, text="📄 Show Downloaded JSON", command=self.show_json)
+        self.json_btn = ttk.Button(action_section, text="Show Downloaded JSON", command=self.show_json, image=json_icon, compound='left')
         self.json_btn.grid(row=1, column=0, pady=5, padx=(0, 8), sticky="ew")
         self.add_tooltip(self.json_btn, "Show the JSON file of downloaded files")
-        self.skipped_btn = ttk.Button(action_section, text="🚫 Show Skipped Files", command=self.show_skipped)
+        self.skipped_btn = ttk.Button(action_section, text="Show Skipped Files", command=self.show_skipped, image=skipped_icon, compound='left')
         self.skipped_btn.grid(row=1, column=1, pady=5, padx=(0, 8), sticky="ew")
         self.add_tooltip(self.skipped_btn, "Show files that were skipped (already exist or duplicate)")
+
+        # Stop / Enable scans controls
+        stop_icon = load_icon("stop")
+        self.stop_scan_btn = ttk.Button(action_section, text="Stop Scans", command=self.stop_scans, image=stop_icon, compound='left')
+        self.stop_scan_btn.grid(row=1, column=2, pady=5, padx=(0, 8), sticky='ew')
+        self.add_tooltip(self.stop_scan_btn, "Stop all future scanning of existing files and cancel any running scan")
+        self.enable_scan_btn = ttk.Button(action_section, text="Enable Scans", command=self.enable_scans, state='disabled')
+        self.enable_scan_btn.grid(row=1, column=3, pady=5, padx=(0, 8), sticky='ew')
+        self.add_tooltip(self.enable_scan_btn, "Re-enable scanning of existing files (undo Stop Scans)")
 
         # --- Progress Section ---
         progress_section = ttk.LabelFrame(self.frame, text="Progress", padding=(15, 10))
@@ -1617,13 +2151,25 @@ class DownloaderGUI:
             self.history_text.insert(tk.END, f"Failed to read log file: {e}")
             self.history_text.configure(state='disabled')
     def pause_downloads(self):
-        """Pause all downloads."""
+        """Pause all downloads and background activity."""
         if not self._is_paused:
             self._pause_event.clear()
             self._is_paused = True
             self.status.set("Paused. Click Resume to continue.")
-            self.pause_btn.config(state='disabled')
-            self.resume_btn.config(state='normal')
+            # Disable pause to avoid repeats; enable resume
+            try:
+                self.pause_btn.config(state='disabled', text='Paused')
+                # swap icon to paused variant if available
+                if 'pause' in self._images:
+                    self.pause_btn.config(image=self._images.get('pause'))
+                self.resume_btn.config(state='normal')
+            except Exception:
+                pass
+            try:
+                self.logger.info("Pausing all activity (user request).")
+            except Exception:
+                pass
+            self.thread_safe_status("All activity paused.")
 
     def resume_downloads(self):
         """Resume paused downloads."""
@@ -1631,8 +2177,20 @@ class DownloaderGUI:
             self._pause_event.set()
             self._is_paused = False
             self.status.set("Resumed. Downloads continuing.")
-            self.pause_btn.config(state='normal')
-            self.resume_btn.config(state='disabled')
+            try:
+                self.pause_btn.config(state='normal', text='Pause')
+                # restore pause icon
+                if 'pause' in self._images:
+                    self.pause_btn.config(image=self._images.get('pause'))
+                self.resume_btn.config(state='disabled')
+            except Exception:
+                pass
+            try:
+                self.logger.info("Resumed all activity (user request).")
+            except Exception:
+                pass
+            self.thread_safe_status("Resumed all activity.")
+
 
     def remove_url(self):
         selection = self.url_listbox.curselection()
@@ -1711,11 +2269,20 @@ class DownloaderGUI:
     def show_json(self):
         json_path = os.path.join(self.base_dir.get(), 'epstein_file_tree.json')
         if os.path.exists(json_path):
-            with open(json_path, 'r', encoding='utf-8') as jf:
-                data = jf.read()
-            self.show_popup("Downloaded Files JSON", data)
-        else:
-            self.show_popup("Downloaded Files JSON", "No JSON file found.")
+            try:
+                with open(json_path, 'r', encoding='utf-8') as jf:
+                    try:
+                        obj = json.load(jf)
+                        data = json.dumps(obj, indent=2)
+                    except Exception:
+                        # If not valid JSON, show a truncated preview
+                        jf.seek(0)
+                        raw = jf.read()
+                        data = raw if len(raw) < 10000 else raw[:10000] + '\n\n...[truncated]'
+                self.show_popup("Downloaded Files JSON", data)
+            except Exception as e:
+                self.logger.error(f"Failed to show JSON: {e}", exc_info=True)
+                self.show_popup("Downloaded Files JSON", f"Failed to read JSON file: {e}")
 
     def show_skipped(self):
         if self.skipped_files:
@@ -1978,6 +2545,13 @@ class DownloaderGUI:
         CACHE_HOURS = 4
         cache_file = hash_file_path + ".cache.json"
         now = time.time()
+        # Respect global disable flag: if scans are disabled, do nothing
+        if getattr(self, '_scans_disabled', False):
+            try:
+                self.thread_safe_status('Scanning disabled by user. Skipping scan.')
+            except Exception:
+                pass
+            return
         # Load cache if exists
         if os.path.exists(cache_file):
             try:
@@ -1996,6 +2570,10 @@ class DownloaderGUI:
         if total == 0:
             self.thread_safe_status("No files found for scanning.")
             return
+
+        # Support canceling a long-running scan
+        self._scanning = True
+        self._cancel_scan = False
 
         def hash_file_worker(path):
             relpath = os.path.relpath(path, base_dir).replace('\\', '/').lower()
@@ -2021,6 +2599,9 @@ class DownloaderGUI:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_idx = {executor.submit(hash_file_worker, path): idx for idx, path in enumerate(all_files)}
             for count, future in enumerate(as_completed(future_to_idx), 1):
+                if getattr(self, '_cancel_scan', False):
+                    self.logger.info('Scan canceled by user.')
+                    break
                 idx = future_to_idx[future]
                 path, file_hash, relpath, filename, hash_time = future.result()
                 results[idx] = (path, file_hash)
@@ -2029,16 +2610,27 @@ class DownloaderGUI:
                 # Update cache
                 if file_hash:
                     hash_cache[path] = (file_hash, hash_time)
-                if count % 25 == 0 or count == total:
+                # Update more frequently so UI feels responsive
+                if count % 5 == 0 or count == total:
                     msg = f"Scanning for existing files: {count}/{total} ({int(count/total*100) if total else 100}%)"
                     self.root.after(0, self.thread_safe_status, msg)
-
-        # Save updated cache
-        try:
-            with open(cache_file, "w", encoding="utf-8") as cf:
-                json.dump(hash_cache, cf)
-        except Exception:
-            pass
+            self._scanning = False
+            if getattr(self, '_cancel_scan', False):
+                self.root.after(0, self.thread_safe_status, 'Scan canceled.')
+            else:
+                self.root.after(0, self.thread_safe_status, 'Scanning complete.')
+                try:
+                    self.logger.info('Existing file scan completed.')
+                except Exception:
+                    pass
+                # Write a meta file to indicate when a full scan completed successfully
+                try:
+                    import time, json
+                    meta = {"last_scan": time.time()}
+                    with open(hash_file_path + ".meta.json", 'w', encoding='utf-8') as mf:
+                        json.dump(meta, mf)
+                except Exception:
+                    pass
 
         with open(hash_file_path, 'w', encoding='utf-8') as hf:
             for path, file_hash in results:
@@ -2065,6 +2657,15 @@ class DownloaderGUI:
 
     def start_download_all_thread(self):
         import threading
+        # If configured to start minimized while downloading, iconify first
+        try:
+            if self.config.get("start_minimized", False):
+                try:
+                    self.root.iconify()
+                except Exception:
+                    pass
+        except Exception:
+            pass
         threading.Thread(target=self.download_all, daemon=True).start()
 
     def download_all(self):
@@ -2081,12 +2682,57 @@ class DownloaderGUI:
             self.hash_file_path = os.path.join(base_dir, 'existing_hashes.txt')
             self.setup_logger(base_dir)
             self.logger.info(f"Starting download. URLs: {urls}")
+            # Only perform a full scan if it's been more than 4 hours since the last full scan
+            import time, json
+            meta_file = self.hash_file_path + ".meta.json"
+            SKIP_HOURS = 4
+            last_scan = 0
             try:
-                self.build_existing_hash_file(base_dir_cmp, self.hash_file_path)
-            except Exception as e:
-                self.logger.error(f"Failed to build hash file: {e}")
-                self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to scan existing files: {e}"))
-                return
+                if os.path.exists(meta_file):
+                    with open(meta_file, 'r', encoding='utf-8') as mf:
+                        meta = json.load(mf)
+                        last_scan = float(meta.get('last_scan', 0))
+            except Exception:
+                last_scan = 0
+            now = time.time()
+            # If scan is recent and no force rescan requested, skip the expensive scan
+            if (now - last_scan) < (SKIP_HOURS * 3600) and not getattr(self, '_force_rescan', False):
+                self.thread_safe_status("Skipping full file scan (recent scan exists).")
+                self.logger.info("Skipping build_existing_hash_file due to recent scan.")
+                # Load existing hashes into memory so duplicate checks still work
+                self._existing_files = {}
+                try:
+                    if os.path.exists(self.hash_file_path):
+                        with open(self.hash_file_path, 'r', encoding='utf-8') as hf:
+                            for line in hf:
+                                parts = line.strip().split('\t', 1)
+                                if len(parts) == 2:
+                                    file_hash, path = parts
+                                    filename = os.path.basename(path).lower()
+                                    relpath = os.path.relpath(path, base_dir).replace('\\', '/').lower()
+                                    self._existing_files[(filename, relpath)] = file_hash
+                except Exception:
+                    self.logger.exception("Failed to load existing hashes when skipping full scan.")
+            else:
+                # If a force rescan was requested, clear the flag and ensure cache/meta are removed
+                if getattr(self, '_force_rescan', False):
+                    self.logger.info('Force full hash rescan requested by user.')
+                    try:
+                        cache_file = self.hash_file_path + ".cache.json"
+                        meta_file = self.hash_file_path + ".meta.json"
+                        if os.path.exists(cache_file):
+                            os.remove(cache_file)
+                        if os.path.exists(meta_file):
+                            os.remove(meta_file)
+                    except Exception:
+                        pass
+                    self._force_rescan = False
+                try:
+                    self.build_existing_hash_file(base_dir_cmp, self.hash_file_path)
+                except Exception as e:
+                    self.logger.error(f"Failed to build hash file: {e}")
+                    self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to scan existing files: {e}"))
+                    return
             self.skipped_files = set()
             self.file_tree = {}
             all_files = set()
@@ -2410,15 +3056,69 @@ def main():
         root.iconbitmap("JosephThePlatypus.ico")
     except Exception as e:
         print(f"Warning: Could not set window icon: {e}")
-    # Install dependencies with progress dialog before launching main GUI
+    # Check for headless mode (CI smoke tests) and suppression flag for the startup dialog
+    headless = os.environ.get('EPSTEIN_HEADLESS', '0') == '1'
+    suppress_startup_dialog = os.environ.get('EPSTEIN_SUPPRESS_STARTUP_DIALOG', '0') == '1'
+    # Optionally skip the potentially interactive dependency installer in headless mode
     try:
-        install_dependencies_with_progress(root)
+        if not headless:
+            install_dependencies_with_progress(root)
     except Exception as dep_err:
-        messagebox.showerror("Startup Error", f"Failed to install dependencies: {dep_err}")
+        try:
+            messagebox.showerror("Startup Error", f"Failed to install dependencies: {dep_err}")
+        except Exception:
+            pass
         root.destroy()
         return
-    app = DownloaderGUI(root)
+
+    # Instantiate the GUI defensively so NameError can be diagnosed and handled cleanly
+    try:
+        logging.getLogger("EpsteinFilesDownloader").info("Creating DownloaderGUI instance...")
+        app = DownloaderGUI(root)
+        logging.getLogger("EpsteinFilesDownloader").info("DownloaderGUI instance created.")
+    except NameError as ne:
+        # Collect helpful diagnostics to the log to aid debugging of intermittent NameError
+        try:
+            gkeys = list(globals().keys())
+            mod_path = os.path.abspath(__file__) if '__file__' in globals() else 'unknown'
+            mtime = os.path.getmtime(mod_path) if os.path.exists(mod_path) else None
+            msize = os.path.getsize(mod_path) if os.path.exists(mod_path) else None
+            logging.getLogger("EpsteinFilesDownloader").exception(
+                "NameError during DownloaderGUI instantiation: %s\nGlobals keys: %s\nModule: %s size=%s mtime=%s",
+                ne, gkeys, mod_path, msize, mtime
+            )
+        except Exception:
+            logging.getLogger("EpsteinFilesDownloader").exception("NameError during DownloaderGUI instantiation and failed to collect diagnostics: %s", ne)
+        try:
+            root.destroy()
+        except Exception:
+            pass
+        return
+    except Exception as e:
+        logging.getLogger("EpsteinFilesDownloader").exception("Exception during DownloaderGUI init: %s", e)
+        try:
+            root.destroy()
+        except Exception:
+            pass
+        return
+
+    # Log successful initialization instead of showing a modal popup (avoid blocking automated runs)
+    try:
+        logging.getLogger("EpsteinFilesDownloader").info("GUI initialized successfully. If you cannot see the window, check the taskbar.")
+    except Exception:
+        logging.getLogger("EpsteinFilesDownloader").warning("GUI initialized, but failed to write startup log message.")
+
+    # In headless mode we don't enter the Tk mainloop; just initialize and exit cleanly for CI smoke tests
+    if headless:
+        logging.getLogger("EpsteinFilesDownloader").info("Headless initialization complete.")
+        try:
+            root.destroy()
+        except Exception:
+            pass
+        return
+
     root.mainloop()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
+    logging.getLogger("EpsteinFilesDownloader").info("Starting main()...")
     main()
