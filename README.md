@@ -42,6 +42,27 @@ You can change the URLs in the GUI or by editing the `default_urls` list in `eps
   export EPISTEIN_SKIP_INSTALL=1
   pytest -q
   ```
+
+## Installer
+A PowerShell installer `EpsteinDownloaderInstaller.ps1` has been added to create an installed copy under `C:\Program Files\PlatypusFiles\WebsiteFileDownloader` by default.
+
+Usage (PowerShell, run as Administrator):
+
+```powershell
+# Run default installer and be prompted to install dependencies and optionally build an .exe
+pwsh -ExecutionPolicy Bypass -File EpsteinDownloaderInstaller.ps1
+
+# Or provide a custom install location
+pwsh -ExecutionPolicy Bypass -File EpsteinDownloaderInstaller.ps1 -InstallDir "C:\Your\Install\Path"
+```
+
+The installer will:
+- Copy `epstein_downloader_gui.py`, assets, `requirements.txt`, and other runtime files to the install folder
+- Prompt to install Python dependencies from `requirements.txt` (Yes => installs, No => exits)
+- Offer to build a single-file executable using PyInstaller (requires PyInstaller to be installed; installer will attempt to install it)
+
+After installation the app prefers to run from the install folder so assets, logs, and configuration are located under the install directory by default.
+
 - If you need Playwright browsers for full end-to-end runs, install them explicitly with `python -m playwright install` prior to running those workflows or tests.
 
 ## Environment variables

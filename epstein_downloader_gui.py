@@ -5,6 +5,20 @@ __version__ = "1.0.0"
 
 
 import io
+import os as _os_for_install_check
+
+# Default installation directory; overridable via EPISTEIN_INSTALL_DIR env var
+INSTALL_DIR = _os_for_install_check.environ.get(
+    "EPISTEIN_INSTALL_DIR",
+    r"C:\Program Files\PlatypusFiles\WebsiteFileDownloader",
+)
+
+
+# Helper: prefer files under INSTALL_DIR first, then fallback to package dir
+def _installed_path(*parts):
+    return os.path.join(INSTALL_DIR, *parts)
+
+
 import os
 import re
 import sys
@@ -318,8 +332,10 @@ class DownloaderGUI:
             self.dark_mode = self.detect_os_dark_mode()
         except Exception:
             pass
-        self.base_dir = tk.StringVar(value=r"C:\Downloads\Epstein")
-        self.log_dir = os.path.join(os.getcwd(), "logs")
+        # Default download folder lives under the installer path (user may change this in Settings)
+        self.base_dir = tk.StringVar(value=_installed_path("Downloads"))
+        # Default log directory is under the installer location
+        self.log_dir = os.path.join(INSTALL_DIR, "logs")
         self.credentials_path = None
         self.concurrent_downloads = tk.IntVar(value=3)
         self.urls = []
@@ -330,10 +346,9 @@ class DownloaderGUI:
             "https://www.justice.gov/epstein/doj-disclosures",
             "https://drive.google.com/drive/folders/1TrGxDGQLDLZu1vvvZDBAh-e7wN3y6Hoz?usp=sharing",
         ]
-        self.queue_state_path = os.path.join(
-            os.path.dirname(__file__), "queue_state.json"
-        )
-        self.config_path = os.path.join(os.path.dirname(__file__), "config.json")
+        # Persisted state and config live under the installation directory by default
+        self.queue_state_path = _installed_path("queue_state.json")
+        self.config_path = _installed_path("config.json")
         self.status = tk.StringVar(value="Ready")
         self.speed_eta_var = tk.StringVar(value="Speed: --  ETA: --")
         self.error_log_path = os.path.join(self.log_dir, "error.log")
@@ -1289,7 +1304,12 @@ class DownloaderGUI:
             "download",
             "stop",
         ]
-        assets_dir = os.path.join(os.path.dirname(__file__), "assets")
+        # Prefer assets from the installer directory if present, fallback to package assets
+        assets_dir = (
+            _installed_path("assets")
+            if os.path.isdir(_installed_path("assets"))
+            else os.path.join(os.path.dirname(__file__), "assets")
+        )
         os.makedirs(assets_dir, exist_ok=True)
         for name in expected:
             p = os.path.join(assets_dir, name + ".png")
@@ -2547,7 +2567,6 @@ class DownloaderGUI:
                 return
             # If we reach here, either credentials are missing or API failed and fallback is requested
             try:
-
                 os.makedirs(gdrive_dir, exist_ok=True)
                 self.logger.info(
                     "Attempting gdown fallback for Google Drive folder download..."
@@ -4877,7 +4896,6 @@ class DownloaderGUI:
         file_tree=None,
         all_files=None,
     ):
-
         allowed_domains = [
             "https://www.justice.gov/epstein",
             "https://oversight.house.gov/release/oversight-committee-releases-epstein-records-provided-by-the-department-of-justice/",
