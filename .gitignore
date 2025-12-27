@@ -1,27 +1,13 @@
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-env/
-.venv/
-venv/
-.Python
+*.py[cod]
+*$py.class
 
-# Distribution / packaging
-build/
+# Ignore local backups and large bundles
+backups/
+
+# Ignore build artifacts and executable distributions
 dist/
-*.egg-info/
-
-# Logs
-logs/
-*.log
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Local config
-config.json
-credentials.json
-queue_state.json
+bin/
+*.exe
+*.bundle
