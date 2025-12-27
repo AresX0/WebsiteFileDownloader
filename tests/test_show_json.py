@@ -1,5 +1,3 @@
-import os
-import json
 import tkinter as tk
 import pytest
 from epstein_downloader_gui import DownloaderGUI
