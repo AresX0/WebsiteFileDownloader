@@ -1011,16 +1011,59 @@ class DownloaderGUI:
         # Accept dropped credentials.json file
         dropped = event.data
         if dropped:
-            items = self.root.tk.splitlist(dropped)
-            for item in items:
+            # Attempt to parse tcl list-style dropped data; be robust to platform differences
+            try:
+                items = tuple(self.root.tk.splitlist(dropped))
+            except Exception:
+                items = (dropped,)
+            processed = []
+            # If splitlist produced fragments (common on Windows), fall back to the raw dropped string
+            for it in items:
+                cand = it.strip('{}"')
+                processed.append(cand)
+            use_raw = False
+            if len(processed) > 1 and not any(os.path.isabs(p) or ":" in p for p in processed):
+                use_raw = True
+            if use_raw:
+                processed = [dropped.strip('{}"')]
+
+            for item in processed:
                 if item.lower().endswith("credentials.json"):
-                    # Copy or set config to use this credentials file
-                    self.config["credentials_path"] = item
-                    self.save_config()
-                    self.logger.info(f"Set credentials.json via drag-and-drop: {item}")
-                    messagebox.showinfo(
-                        "Credentials Set", f"credentials.json set to: {item}"
-                    )
+                    # If parsed token is not an absolute path and doesn't appear valid, try the raw dropped string
+                    if not (os.path.isabs(item) or ":" in item or os.path.exists(item)):
+                        raw = dropped.strip('{}"')
+                        if raw.lower().endswith("credentials.json"):
+                            item = raw
+                        else:
+                            self.logger.info(
+                                f"Dropped fragment ignored (not a valid path): {item}"
+                            )
+                            continue
+                    # Set credentials path, try to load immediately, and persist
+                    try:
+                        self.credentials_path = item
+                        self.config["credentials_path"] = item
+                        try:
+                            self.reload_credentials(item)
+                        except Exception as e:
+                            self.logger.warning(f"Failed to load credentials on drop: {e}")
+                        self.save_config()
+                        self.logger.info(f"Set credentials.json via drag-and-drop: {item}")
+                        try:
+                            messagebox.showinfo(
+                                "Credentials Set", f"credentials.json set to: {item}"
+                            )
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        self.logger.exception(f"Error handling dropped credentials: {e}")
+                        try:
+                            messagebox.showerror(
+                                "Credentials Error",
+                                f"Failed to set credentials from dropped file: {e}",
+                            )
+                        except Exception:
+                            pass
                 else:
                     self.logger.info(
                         f"Dropped file ignored (not credentials.json): {item}"
@@ -2411,7 +2454,7 @@ class DownloaderGUI:
                             "Validate Credentials", "Credentials are valid."
                         ),
                     )
-                except Exception:
+                except Exception as e:
                     self.root.after(
                         0,
                         lambda: messagebox.showerror(
@@ -2419,7 +2462,7 @@ class DownloaderGUI:
                             f"Credentials validation failed: {e}",
                         ),
                     )
-            except Exception:
+            except Exception as e:
                 self.root.after(
                     0,
                     lambda: messagebox.showerror(
