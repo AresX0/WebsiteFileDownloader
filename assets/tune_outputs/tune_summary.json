@@ -1,0 +1,186 @@
+{
+  "settings_tried": [
+    [
+      120,
+      100
+    ],
+    [
+      140,
+      120
+    ],
+    [
+      180,
+      120
+    ]
+  ],
+  "summary": {
+    "dm120_f100": {
+      "report": "assets\\tune_outputs\\dm120_f100\\assets_report.json",
+      "previews": "assets\\tune_outputs\\dm120_f100\\previews",
+      "per_asset": [
+        {
+          "file": "download.png",
+          "pct_trans": 0.0,
+          "pct_dark": 5.034722222222222
+        },
+        {
+          "file": "json.png",
+          "pct_trans": 53.125,
+          "pct_dark": 46.875
+        },
+        {
+          "file": "pause.png",
+          "pct_trans": 0.0,
+          "pct_dark": 40.97222222222222
+        },
+        {
+          "file": "platypus.png",
+          "pct_trans": 25.0,
+          "pct_dark": 26.5625
+        },
+        {
+          "file": "reset.png",
+          "pct_trans": 0.0,
+          "pct_dark": 21.875
+        },
+        {
+          "file": "resume.png",
+          "pct_trans": 28.819444444444443,
+          "pct_dark": 71.18055555555556
+        },
+        {
+          "file": "schedule.png",
+          "pct_trans": 0.0,
+          "pct_dark": 15.972222222222221
+        },
+        {
+          "file": "skipped.png",
+          "pct_trans": 67.36111111111111,
+          "pct_dark": 32.638888888888886
+        },
+        {
+          "file": "start.png",
+          "pct_trans": 0.0,
+          "pct_dark": 34.72222222222222
+        },
+        {
+          "file": "stop.png",
+          "pct_trans": 0.0,
+          "pct_dark": 27.083333333333332
+        }
+      ]
+    },
+    "dm140_f120": {
+      "report": "assets\\tune_outputs\\dm140_f120\\assets_report.json",
+      "previews": "assets\\tune_outputs\\dm140_f120\\previews",
+      "per_asset": [
+        {
+          "file": "download.png",
+          "pct_trans": 0.0,
+          "pct_dark": 5.902777777777778
+        },
+        {
+          "file": "json.png",
+          "pct_trans": 53.125,
+          "pct_dark": 46.875
+        },
+        {
+          "file": "pause.png",
+          "pct_trans": 0.0,
+          "pct_dark": 42.361111111111114
+        },
+        {
+          "file": "platypus.png",
+          "pct_trans": 25.0,
+          "pct_dark": 30.555555555555557
+        },
+        {
+          "file": "reset.png",
+          "pct_trans": 0.0,
+          "pct_dark": 23.09027777777778
+        },
+        {
+          "file": "resume.png",
+          "pct_trans": 28.819444444444443,
+          "pct_dark": 71.18055555555556
+        },
+        {
+          "file": "schedule.png",
+          "pct_trans": 0.0,
+          "pct_dark": 18.055555555555557
+        },
+        {
+          "file": "skipped.png",
+          "pct_trans": 67.36111111111111,
+          "pct_dark": 32.638888888888886
+        },
+        {
+          "file": "start.png",
+          "pct_trans": 0.0,
+          "pct_dark": 35.59027777777778
+        },
+        {
+          "file": "stop.png",
+          "pct_trans": 0.0,
+          "pct_dark": 27.083333333333332
+        }
+      ]
+    },
+    "dm180_f120": {
+      "report": "assets\\tune_outputs\\dm180_f120\\assets_report.json",
+      "previews": "assets\\tune_outputs\\dm180_f120\\previews",
+      "per_asset": [
+        {
+          "file": "download.png",
+          "pct_trans": 0.0,
+          "pct_dark": 7.986111111111111
+        },
+        {
+          "file": "json.png",
+          "pct_trans": 53.125,
+          "pct_dark": 46.875
+        },
+        {
+          "file": "pause.png",
+          "pct_trans": 0.0,
+          "pct_dark": 52.77777777777778
+        },
+        {
+          "file": "platypus.png",
+          "pct_trans": 25.0,
+          "pct_dark": 39.75694444444444
+        },
+        {
+          "file": "reset.png",
+          "pct_trans": 0.0,
+          "pct_dark": 24.65277777777778
+        },
+        {
+          "file": "resume.png",
+          "pct_trans": 28.819444444444443,
+          "pct_dark": 71.18055555555556
+        },
+        {
+          "file": "schedule.png",
+          "pct_trans": 0.0,
+          "pct_dark": 20.3125
+        },
+        {
+          "file": "skipped.png",
+          "pct_trans": 67.36111111111111,
+          "pct_dark": 32.638888888888886
+        },
+        {
+          "file": "start.png",
+          "pct_trans": 0.0,
+          "pct_dark": 41.666666666666664
+        },
+        {
+          "file": "stop.png",
+          "pct_trans": 0.0,
+          "pct_dark": 31.25
+        }
+      ]
+    }
+  }
+}
