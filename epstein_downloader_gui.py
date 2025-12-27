@@ -49,6 +49,7 @@ except ImportError:
         "  or: python -m pip install -r requirements.txt\n"
     )
     raise
+import requests
 import time
 import importlib.util
 import subprocess
@@ -162,6 +163,10 @@ def install_dependencies_with_progress(root=None):
             if root is not None and getattr(root, "after", None):
                 try:
                     root.after(100, _poll)
+            # Still running; poll again shortly
+            if root is not None and getattr(root, "after", None):
+                try:
+                    root.after(200, _poll)
                 except Exception:
                     pass
             return
@@ -192,6 +197,10 @@ def install_dependencies_with_progress(root=None):
     if root is not None and getattr(root, "after", None):
         try:
             root.after(50, _poll)
+    # Start polling
+    if root is not None and getattr(root, "after", None):
+        try:
+            root.after(100, _poll)
         except Exception:
             pass
     else:
@@ -368,6 +377,9 @@ class DownloaderGUI:
             self.queue_state_path = repo_queue
         else:
             self.queue_state_path = _installed_path("queue_state.json")
+        # Persisted state and config live under the installation directory by default
+        self.queue_state_path = _installed_path("queue_state.json")
+        self.config_path = _installed_path("config.json")
         self.status = tk.StringVar(value="Ready")
         self.speed_eta_var = tk.StringVar(value="Speed: --  ETA: --")
         self.error_log_path = os.path.join(self.log_dir, "error.log")
@@ -918,6 +930,68 @@ class DownloaderGUI:
         except Exception:
             pass
 
+
+    def shutdown(self, timeout=5):
+        """Signal background threads to stop and wait for known threads to exit.
+
+        This method attempts a conservative, backward-compatible shutdown:
+        - sets stop/cancel flags so running workers exit quickly
+        - resumes paused threads so they can observe stop requests
+        - stops spinner and other scheduled UI callbacks
+        - joins known long-running threads with a timeout
+        """
+        import time
+
+        # Signal stop and cancellation
+        try:
+            if getattr(self, "_stop_event", None):
+                self._stop_event.set()
+        except Exception:
+            pass
+        try:
+            self._cancel_scan = True
+        except Exception:
+            pass
+        try:
+            # Unpause anything paused so threads can proceed to cooperative exit
+            if getattr(self, "_pause_event", None):
+                self._pause_event.set()
+            self._is_paused = False
+        except Exception:
+            pass
+        # Stop spinner (cancels scheduled after jobs)
+        try:
+            self.stop_spinner()
+        except Exception:
+            pass
+        # Attempt to join tracked threads
+        joinables = []
+        try:
+            if getattr(self, "_download_all_thread", None):
+                joinables.append(self._download_all_thread)
+        except Exception:
+            pass
+        try:
+            if getattr(self, "_process_thread", None):
+                joinables.append(self._process_thread)
+        except Exception:
+            pass
+        # Join with timeout
+        start = time.time()
+        for t in joinables:
+            try:
+                remaining = max(0.0, timeout - (time.time() - start))
+                if remaining <= 0:
+                    break
+                t.join(remaining)
+            except Exception:
+                pass
+        # Give a short grace period for thread pools / workers
+        try:
+            time.sleep(0.1)
+        except Exception:
+            pass
+
     def log_error(
         self, err: Exception, context: str = ""
     ):  # Utility for error logging and dialog
@@ -1064,6 +1138,16 @@ class DownloaderGUI:
                             )
                         except Exception:
                             pass
+            items = self.root.tk.splitlist(dropped)
+            for item in items:
+                if item.lower().endswith("credentials.json"):
+                    # Copy or set config to use this credentials file
+                    self.config["credentials_path"] = item
+                    self.save_config()
+                    self.logger.info(f"Set credentials.json via drag-and-drop: {item}")
+                    messagebox.showinfo(
+                        "Credentials Set", f"credentials.json set to: {item}"
+                    )
                 else:
                     self.logger.info(
                         f"Dropped file ignored (not credentials.json): {item}"
@@ -2455,6 +2539,7 @@ class DownloaderGUI:
                         ),
                     )
                 except Exception as e:
+                except Exception:
                     self.root.after(
                         0,
                         lambda: messagebox.showerror(
@@ -2463,6 +2548,7 @@ class DownloaderGUI:
                         ),
                     )
             except Exception as e:
+            except Exception:
                 self.root.after(
                     0,
                     lambda: messagebox.showerror(
@@ -5362,6 +5448,9 @@ class DownloaderGUI:
             )
         else:
             raise RuntimeError("No credentials available for Google Drive API download")
+        creds = service_account.Credentials.from_service_account_file(
+            credentials_path, scopes=SCOPES
+        )
         service = build("drive", "v3", credentials=creds)
 
         def list_files(service, folder_id):
