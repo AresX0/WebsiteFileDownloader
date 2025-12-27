@@ -155,6 +155,11 @@ class DownloaderGUI:
     def __init__(self, root):
         self.root = root
         self.dark_mode = False
+        try:
+            # Detect OS-level dark mode preference when available
+            self.dark_mode = self.detect_os_dark_mode()
+        except Exception:
+            pass
         self.base_dir = tk.StringVar(value=r'C:\Downloads\Epstein')
         self.log_dir = os.path.join(os.getcwd(), "logs")
         self.credentials_path = None
@@ -172,11 +177,15 @@ class DownloaderGUI:
         self.status = tk.StringVar(value="Ready")
         self.speed_eta_var = tk.StringVar(value="Speed: --  ETA: --")
         self.error_log_path = os.path.join(self.log_dir, "error.log")
-        self.log_file = os.path.join(self.log_dir, f"epstein_downloader_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+        self.log_file = os.path.join(self.log_dir, 'epstein_downloader.log')
         import threading
         self._pause_event = threading.Event()
         self._pause_event.set()  # Start in 'running' state; clear() will pause
         self._is_paused = False
+        # Event to request a full stop of all activity (downloads, scans, workers)
+        self._stop_event = threading.Event()
+        self._stop_event.clear()
+        self._is_stopped = False
         # Image cache to keep PhotoImage refs
         self._images = {}
         self.downloaded_json = tk.StringVar(value="")
@@ -187,30 +196,6 @@ class DownloaderGUI:
         except Exception:
             # Ensure asset generation failures do not block GUI startup
             pass
-        self.logger.setLevel(logging.DEBUG)
-        if self.logger.hasHandlers():
-            self.logger.handlers.clear()
-        fh = logging.FileHandler(self.log_file, encoding='utf-8')
-        fh.setLevel(logging.DEBUG)
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        fh.setFormatter(formatter)
-        self.logger.addHandler(fh)
-        sh = logging.StreamHandler()
-        sh.setLevel(logging.INFO)
-        sh.setFormatter(formatter)
-        self.logger.addHandler(sh)
-        class StatusPaneHandler(logging.Handler):
-            def __init__(self, gui):
-                super().__init__()
-                self.gui = gui
-            def emit(self, record):
-                msg = self.format(record)
-                self.gui.append_status_pane(msg)
-        status_handler = StatusPaneHandler(self)
-        status_handler.setLevel(logging.INFO)
-        status_handler.setFormatter(formatter)
-        self.logger.addHandler(status_handler)
-        self.logger.info("Logger initialized.")
         # Now safe to load config and restore queue state
         self.config = self.load_config() if hasattr(self, 'load_config') else {}
         # Option for gdown fallback (must be after self.config is loaded)
@@ -270,6 +255,9 @@ class DownloaderGUI:
                 self.start_download_all_thread()
         except Exception:
             self.logger.debug("No auto-start applied (either not configured or failed).")
+
+        # No background log merger by default. All logging will go to a single
+        # file managed by `setup_logger` to avoid rotated files scattered.
 
     def open_selected_url_in_browser(self):
         selection = self.url_listbox.curselection()
@@ -405,6 +393,48 @@ class DownloaderGUI:
             self.log_panel.insert('end', msg + '\n')
             self.log_panel.see('end')
             self.log_panel.configure(state='disabled')
+
+    def log_button_event(self, name, event=None):
+        """Log a button click event with widget state and a stack trace for debugging."""
+        try:
+            import traceback
+            widget = getattr(event, 'widget', None)
+            try:
+                widget_info = f"{widget}" if widget is not None else 'None'
+            except Exception:
+                widget_info = 'unavailable'
+            try:
+                state = widget.cget('state') if widget is not None else 'NA'
+            except Exception:
+                state = 'NA'
+            try:
+                stack = ''.join(traceback.format_stack())
+            except Exception:
+                stack = '<stack-unavailable>'
+            # Always append an audit record to a separate append-only file so clicks
+            # are preserved even if the main logger is reconfigured later.
+            try:
+                audit_dir = getattr(self, 'log_dir', os.path.join(os.getcwd(), 'logs'))
+                os.makedirs(audit_dir, exist_ok=True)
+                audit_path = os.path.join(audit_dir, 'button_audit.log')
+                from datetime import datetime
+                with open(audit_path, 'a', encoding='utf-8') as af:
+                    af.write(f"{datetime.now().isoformat()} - {name} | widget={widget_info} | state={state}\n")
+                    af.write(stack + "\n")
+            except Exception:
+                # Best-effort only; don't raise from logging
+                pass
+            try:
+                self.logger.info(f"Button clicked: {name} | widget={widget_info} | state={state}")
+                self.logger.debug(f"Call stack for button '{name}':\n{stack}")
+            except Exception:
+                print(f"Button clicked: {name} | widget={widget_info} | state={state}")
+                print(stack)
+        except Exception as e:
+            try:
+                self.logger.exception(f"Failed to log button event for {name}: {e}")
+            except Exception:
+                pass
 
     def setup_url_listbox_context_menu(self):
         # Context menu for URL listbox
@@ -920,6 +950,87 @@ class DownloaderGUI:
         except Exception:
             pass
 
+    # --- Spinner (animated) helpers ---
+    def start_spinner(self):
+        try:
+            if getattr(self, '_spinner_running', False):
+                return
+            self._spinner_running = True
+            try:
+                self._spinner_canvas.grid()
+            except Exception:
+                pass
+            # initialize angle and kick off animation loop
+            try:
+                self._spinner_angle = 0.0
+            except Exception:
+                self._spinner_angle = 0.0
+            self._spinner_step()
+        except Exception:
+            pass
+
+    def _spinner_step(self):
+        try:
+            if not getattr(self, '_spinner_running', False):
+                return
+            # Update orbital positions for two balls
+            try:
+                import math
+                # advance by small radian step for smooth animation
+                step = 0.18
+                self._spinner_angle = (getattr(self, '_spinner_angle', 0.0) + step) % (2 * math.pi)
+                a1 = self._spinner_angle
+                a2 = (self._spinner_angle + math.pi) % (2 * math.pi)
+                r = getattr(self, '_spinner_r', 10)
+                cx = getattr(self, '_spinner_cx', 16)
+                cy = getattr(self, '_spinner_cy', 16)
+                bsize = 6
+                x1 = int(cx + r * math.cos(a1))
+                y1 = int(cy + r * math.sin(a1))
+                x2 = int(cx + r * math.cos(a2))
+                y2 = int(cy + r * math.sin(a2))
+                # update coords of the two balls
+                try:
+                    self._spinner_canvas.coords(self._spinner_ball1, x1 - bsize//2, y1 - bsize//2, x1 + bsize//2, y1 + bsize//2)
+                    self._spinner_canvas.coords(self._spinner_ball2, x2 - bsize//2, y2 - bsize//2, x2 + bsize//2, y2 + bsize//2)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            # Schedule next frame (~30 FPS)
+            try:
+                self._spinner_job = self.root.after(33, self._spinner_step)
+            except Exception:
+                self.stop_spinner()
+        except Exception:
+            pass
+
+    def stop_spinner(self):
+        try:
+            self._spinner_running = False
+            if getattr(self, '_spinner_job', None):
+                try:
+                    self.root.after_cancel(self._spinner_job)
+                except Exception:
+                    pass
+                self._spinner_job = None
+            try:
+                # hide spinner and reset positions
+                try:
+                    self._spinner_canvas.grid_remove()
+                except Exception:
+                    pass
+                try:
+                    # move balls off-canvas to avoid visual artifacts
+                    self._spinner_canvas.coords(self._spinner_ball1, -10, -10, -6, -6)
+                    self._spinner_canvas.coords(self._spinner_ball2, -10, -10, -6, -6)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def import_settings(self):
         """Import settings from a user-chosen JSON file."""
         file_path = filedialog.askopenfilename(
@@ -1019,7 +1130,13 @@ class DownloaderGUI:
         notebook.add(appearance_tab, text="Appearance")
         ttk.Label(appearance_tab, text="Theme:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
         theme_var = tk.StringVar(value="Dark" if self.dark_mode else "Light")
-        theme_combo = ttk.Combobox(appearance_tab, textvariable=theme_var, values=["Light", "Dark"], state="readonly", width=10)
+        theme_combo = ttk.Combobox(
+            appearance_tab,
+            textvariable=theme_var,
+            values=["Light", "Dark", "azure", "sun-valley", "forest"],
+            state="readonly",
+            width=14
+        )
         theme_combo.grid(row=0, column=1, sticky="w", padx=10, pady=10)
 
         # --- Advanced Tab (always visible) ---
@@ -1048,10 +1165,20 @@ class DownloaderGUI:
             # Persist gdown fallback setting (always save current checkbox state)
             self.config["use_gdown_fallback"] = bool(self.use_gdown_fallback.get())
             # Theme
-            new_dark = (theme_var.get() == "Dark")
-            if new_dark != self.dark_mode:
-                self.dark_mode = new_dark
-                self.set_theme('clam' if self.dark_mode else 'default')
+            sel_theme = theme_var.get()
+            # Apply requested theme; support Light/Dark aliases and extra named themes
+            if sel_theme in ('Dark', 'dark'):
+                self.dark_mode = True
+                self.set_theme('clam')
+            elif sel_theme in ('Light', 'light'):
+                self.dark_mode = False
+                self.set_theme('default')
+            else:
+                # Pass through custom theme names (azure, sun-valley, forest)
+                try:
+                    self.set_theme(sel_theme)
+                except Exception:
+                    pass
             self.save_config()
             try:
                 self.logger.info("Settings saved via Advanced Settings.")
@@ -1141,41 +1268,221 @@ class DownloaderGUI:
 
     def stop_scans(self):
         """Disable future scans and cancel any currently running scan."""
-        self._scans_disabled = True
-        # Cancel any running scan
-        if getattr(self, '_scanning', False):
-            self._cancel_scan = True
         try:
-            self.logger.info('User disabled scanning.')
-        except Exception:
-            pass
-        self.thread_safe_status('Scanning disabled by user. Scans will remain disabled until re-enabled.')
-        # Update UI buttons if available
-        try:
-            self.stop_scan_btn.config(state='disabled')
-        except Exception:
-            pass
-        try:
-            self.enable_scan_btn.config(state='normal')
-        except Exception:
-            pass
+            # Log entry state and stack trace
+            try:
+                import traceback
+                stack = ''.join(traceback.format_stack())
+                self.logger.debug(f"stop_scans() called. _scans_disabled={getattr(self, '_scans_disabled', None)}, _scanning={getattr(self, '_scanning', False)}, _cancel_scan={getattr(self, '_cancel_scan', None)}")
+                self.logger.debug(f"stop_scans() call stack:\n{stack}")
+            except Exception:
+                self.logger.debug("stop_scans() called. (failed to read some internal state)")
+            self._scans_disabled = True
+            # Cancel any running scan
+            if getattr(self, '_scanning', False):
+                self._cancel_scan = True
+            try:
+                self.logger.info('User disabled scanning.')
+            except Exception:
+                pass
+            self.thread_safe_status('Scanning disabled by user. Scans will remain disabled until re-enabled.')
+            # Update UI buttons if available
+            try:
+                self.stop_scan_btn.config(state='disabled')
+            except Exception:
+                self.logger.exception('Failed to disable stop_scan_btn in stop_scans')
+            try:
+                self.enable_scan_btn.config(state='normal')
+            except Exception:
+                self.logger.exception('Failed to enable enable_scan_btn in stop_scans')
+            # Log exit state
+            try:
+                self.logger.debug(f"stop_scans() exit. _scans_disabled={getattr(self, '_scans_disabled', None)}, _scanning={getattr(self, '_scanning', False)}, stop_scan_btn_state={self.stop_scan_btn.cget('state') if hasattr(self, 'stop_scan_btn') else 'NA'}, enable_scan_btn_state={self.enable_scan_btn.cget('state') if hasattr(self, 'enable_scan_btn') else 'NA'}")
+            except Exception:
+                self.logger.debug("stop_scans() exit. (failed to read some UI state)")
+        except Exception as e:
+            self.logger.exception(f"Exception in stop_scans: {e}")
 
     def enable_scans(self):
         """Re-enable scanning for existing files."""
-        self._scans_disabled = False
         try:
-            self.logger.info('User enabled scanning.')
-        except Exception:
-            pass
-        self.thread_safe_status('Scanning enabled. Full scans will run as scheduled.')
+            # Log entry state and stack trace
+            try:
+                import traceback
+                stack = ''.join(traceback.format_stack())
+                self.logger.debug(f"enable_scans() called. _scans_disabled={getattr(self, '_scans_disabled', None)}")
+                self.logger.debug(f"enable_scans() call stack:\n{stack}")
+            except Exception:
+                self.logger.debug("enable_scans() called. (failed to read some internal state)")
+            self._scans_disabled = False
+            # Also resume downloads if they were paused/stopped
+            try:
+                if getattr(self, '_stop_event', None):
+                    self._stop_event.clear()
+                self._is_stopped = False
+                # Clear any cancellation request for scans
+                try:
+                    self._cancel_scan = False
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            try:
+                self._pause_event.set()
+                self._is_paused = False
+                try:
+                    self.pause_btn.config(state='normal', text='Pause')
+                except Exception:
+                    pass
+                try:
+                    self.resume_btn.config(state='disabled')
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            try:
+                self.logger.info('User enabled scanning.')
+            except Exception:
+                pass
+            self.thread_safe_status('Scanning enabled. Full scans will run as scheduled.')
+            try:
+                self.stop_scan_btn.config(state='normal')
+            except Exception:
+                self.logger.exception('Failed to enable stop_scan_btn in enable_scans')
+            try:
+                self.enable_scan_btn.config(state='disabled')
+            except Exception:
+                self.logger.exception('Failed to disable enable_scan_btn in enable_scans')
+            # Log exit state
+            try:
+                self.logger.debug(f"enable_scans() exit. _scans_disabled={getattr(self, '_scans_disabled', None)}, stop_scan_btn_state={self.stop_scan_btn.cget('state') if hasattr(self, 'stop_scan_btn') else 'NA'}, enable_scan_btn_state={self.enable_scan_btn.cget('state') if hasattr(self, 'enable_scan_btn') else 'NA'}")
+            except Exception:
+                self.logger.debug("enable_scans() exit. (failed to read some UI state)")
+        except Exception as e:
+            self.logger.exception(f"Exception in enable_scans: {e}")
+
+    def stop_all(self):
+        """Stop all activity: request cancellation of downloads, scans, and background workers.
+
+        After stopping, set the scan button into a temporary "Reset" action that clears
+        state and prepares the app for a fresh run when clicked.
+        """
         try:
-            self.stop_scan_btn.config(state='normal')
-        except Exception:
-            pass
+            try:
+                import traceback
+                stack = ''.join(traceback.format_stack())
+                self.logger.debug(f"stop_all() called. _is_stopped={getattr(self, '_is_stopped', None)}, _scans_disabled={getattr(self, '_scans_disabled', None)}")
+                self.logger.debug(f"stop_all() call stack:\n{stack}")
+            except Exception:
+                pass
+            # Signal stop to all workers
+            self._stop_event.set()
+            self._is_stopped = True
+            # Ensure paused threads are released so they can observe the stop request
+            try:
+                self._pause_event.set()
+            except Exception:
+                pass
+            # Also disable future scans and cancel any running scan
+            self._scans_disabled = True
+            try:
+                self._cancel_scan = True
+            except Exception:
+                pass
+            try:
+                self.logger.info('User requested full stop of all activity.')
+            except Exception:
+                pass
+            # Update UI quickly to avoid appearing frozen
+            try:
+                # Disable download controls until reset
+                self.download_btn.config(state='disabled')
+                self.pause_btn.config(state='disabled')
+                self.resume_btn.config(state='disabled')
+                # Turn the Enable Scans button into a Reset button so user can prepare a fresh run
+                try:
+                    self.enable_scan_btn.config(text='Reset', command=self.reset_after_stop, state='normal')
+                    self.add_tooltip(self.enable_scan_btn, 'Reset app state so Start Download can run again')
+                except Exception:
+                    pass
+            except Exception:
+                self.logger.exception('Failed to update UI buttons in stop_all')
+            try:
+                self.stop_spinner()
+            except Exception:
+                pass
+            # Update status message
+            self.thread_safe_status('All activity stopped by user. Click Reset to prepare for a fresh run.')
+            try:
+                self.logger.info('All activity stopped by user; user prompted to reset.')
+            except Exception:
+                pass
+        except Exception as e:
+            self.logger.exception(f"Exception in stop_all: {e}")
+
+    def reset_after_stop(self):
+        """Reset internal state after a Stop so the app is ready for a fresh Start Download."""
         try:
-            self.enable_scan_btn.config(state='disabled')
-        except Exception:
-            pass
+            try:
+                self.logger.debug('reset_after_stop() called: clearing stop flags and resetting UI')
+            except Exception:
+                pass
+            # Clear stop/cancel flags
+            try:
+                if getattr(self, '_stop_event', None):
+                    self._stop_event.clear()
+                self._is_stopped = False
+                self._cancel_scan = False
+            except Exception:
+                pass
+            # Clear paused state and ensure threads can run
+            try:
+                self._pause_event.set()
+                self._is_paused = False
+            except Exception:
+                pass
+            # Reset counters and collections
+            try:
+                self.processed_count = 0
+            except Exception:
+                pass
+            try:
+                self.skipped_files = set()
+                self.file_tree = {}
+            except Exception:
+                pass
+            # Reset progress UI
+            try:
+                self.progress['value'] = 0
+                try:
+                    self.file_progress['value'] = 0
+                except Exception:
+                    pass
+                self.speed_eta_var.set("Speed: --  ETA: --")
+                self.update_summary_bar(queued=len(self.urls), completed=0, failed=0)
+            except Exception:
+                pass
+            # Ensure buttons reflect a fresh state
+            try:
+                self.download_btn.config(state='normal')
+                self.pause_btn.config(state='normal', text='Pause')
+                self.resume_btn.config(state='disabled')
+                # Restore enable_scan_btn to original behavior
+                try:
+                    self.enable_scan_btn.config(text='Enable Scans', command=self.enable_scans, state='disabled')
+                    self.add_tooltip(self.enable_scan_btn, 'Re-enable scanning and resume activity (undo Stop)')
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            # Status update
+            try:
+                self.thread_safe_status('Reset complete. Ready for a fresh download run.')
+                self.logger.info('Application state reset by user.')
+            except Exception:
+                pass
+        except Exception as e:
+            self.logger.exception(f"Exception in reset_after_stop: {e}")
 
     def pick_credentials_file(self):
         file_path = filedialog.askopenfilename(
@@ -1215,6 +1522,83 @@ class DownloaderGUI:
             style.configure('TNotebook', background='#f0f0f0')
             style.configure('TNotebook.Tab', background='#e0e0e0', foreground='#222')
             style.configure('TProgressbar', background='#e0e0e0')
+
+        # Try third-party theme packages (ttkbootstrap or ttkthemes) for extra palettes
+        try:
+            # Prefer ttkbootstrap if available
+            import importlib
+            if importlib.util.find_spec('ttkbootstrap') is not None:
+                from ttkbootstrap import Style as TBStyle
+                tbstyle = TBStyle()
+                # Map some friendly names to known ttkbootstrap themes where possible
+                tbmap = {
+                    'azure': 'cosmo',
+                    'sun-valley': 'flatly',
+                    'sun_valley': 'flatly',
+                    'forest': 'minty'
+                }
+                tb_theme = tbmap.get(theme_name.lower(), None)
+                if tb_theme:
+                    try:
+                        tbstyle.theme_use(tb_theme)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # Also update our Modern progressbar styles to match the selected theme/darkness
+        try:
+            pb_trough = '#dfeffb' if not getattr(self, 'dark_mode', False) else '#111217'
+            pb_border = '#8fb5ff' if not getattr(self, 'dark_mode', False) else '#2a2f36'
+            pb_bg = '#0078d7' if not getattr(self, 'dark_mode', False) else '#2a6fb0'
+            pb_light = '#5aa8ff' if not getattr(self, 'dark_mode', False) else '#4e8fb8'
+            pb_dark = '#005bb5' if not getattr(self, 'dark_mode', False) else '#134a75'
+            style.configure('Modern.Horizontal.TProgressbar',
+                            troughcolor=pb_trough,
+                            bordercolor=pb_border,
+                            background=pb_bg,
+                            lightcolor=pb_light,
+                            darkcolor=pb_dark,
+                            thickness=20,
+                            relief='raised')
+            # file progress (green)
+            ff_trough = '#f0f9f0' if not getattr(self, 'dark_mode', False) else '#141814'
+            ff_border = '#9fe39a' if not getattr(self, 'dark_mode', False) else '#25492b'
+            ff_bg = '#66c33a' if not getattr(self, 'dark_mode', False) else '#5fa94c'
+            ff_light = '#98e57a' if not getattr(self, 'dark_mode', False) else '#7fb86a'
+            ff_dark = '#3b8a20' if not getattr(self, 'dark_mode', False) else '#2f6b2f'
+            style.configure('ModernFile.Horizontal.TProgressbar',
+                            troughcolor=ff_trough,
+                            bordercolor=ff_border,
+                            background=ff_bg,
+                            lightcolor=ff_light,
+                            darkcolor=ff_dark,
+                            thickness=14,
+                            relief='raised')
+        except Exception:
+            pass
+
+    def detect_os_dark_mode(self):
+        """Detect OS-level dark mode preference where possible (Windows/macOS)."""
+        try:
+            import sys
+            if sys.platform.startswith('win'):
+                try:
+                    import winreg
+                    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+                    val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+                    # AppsUseLightTheme == 0 -> dark mode enabled
+                    return val == 0
+                except Exception:
+                    return False
+            else:
+                # Try darkdetect package if available on other platforms
+                try:
+                    import darkdetect
+                    return darkdetect.isDark()
+                except Exception:
+                    return False
+        except Exception:
+            return False
 
     def toggle_dark_mode(self):
         self.dark_mode = not getattr(self, 'dark_mode', False)
@@ -1525,6 +1909,13 @@ class DownloaderGUI:
         if base_url in visited:
             return skipped_files, file_tree, all_files
         visited.add(base_url)
+        # Respect a global stop request before starting heavy work
+        if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+            try:
+                self.logger.info(f"Stop requested; aborting traversal of {base_url}")
+            except Exception:
+                pass
+            return skipped_files, file_tree, all_files
         self.logger.info(f"Visiting: {base_url}")
         try:
             page.goto(base_url)
@@ -1535,6 +1926,12 @@ class DownloaderGUI:
         self.logger.info(f"Found {len(links)} links on {base_url}")
         hrefs = []
         for link in links:
+            if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+                try:
+                    self.logger.info(f"Stop requested; aborting link collection on {base_url}")
+                except Exception:
+                    pass
+                break
             try:
                 href = link.get_attribute('href')
                 if href:
@@ -1545,12 +1942,38 @@ class DownloaderGUI:
         download_args = []
         num_threads = 6
         for href in hrefs:
+            # Pause support for traversal
+            while not self._pause_event.is_set():
+                if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+                    try:
+                        self.logger.info(f"Stop requested; aborting file/link loop on {base_url}")
+                    except Exception:
+                        pass
+                    break
+                time.sleep(0.1)
+            if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+                try:
+                    self.logger.info(f"Stop requested; aborting file/link loop on {base_url}")
+                except Exception:
+                    pass
+                break
             if href.startswith('#'):
                 continue
             abs_url = urllib.parse.urljoin(base_url, href)
             if '/search' in abs_url:
                 continue
             if re.search(r'\.(pdf|docx?|xlsx?|zip|txt|jpg|png|csv|mp4|mov|avi|wmv|wav|mp3|m4a)$', abs_url, re.IGNORECASE):
+                # Pause support for file discovery
+                while not self._pause_event.is_set():
+                    if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+                        try:
+                            self.logger.info(f"Stop requested; aborting file discovery for {abs_url}")
+                        except Exception:
+                            pass
+                        break
+                    time.sleep(0.05)
+                if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+                    break
                 rel_path = self.sanitize_path(abs_url.replace('https://', ''))
                 local_path = os.path.join(base_dir, rel_path)
                 folder = os.path.dirname(local_path)
@@ -1575,8 +1998,14 @@ class DownloaderGUI:
             max_retries = 3
             delay = 2
             for attempt in range(1, max_retries + 1):
-                # Pause support
+                # Pause support (also exit if a full stop is requested)
                 while not self._pause_event.is_set():
+                    if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+                        try:
+                            self.logger.info(f"Stop requested; aborting download task for {abs_url}")
+                        except Exception:
+                            pass
+                        return
                     time.sleep(0.1)
                 try:
                     if not self.validate_url(abs_url):
@@ -1605,6 +2034,12 @@ class DownloaderGUI:
                         with open(local_path, 'wb') as f:
                             for chunk in r.iter_content(chunk_size=8192):
                                 while not self._pause_event.is_set():
+                                    if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+                                        try:
+                                            self.logger.info(f"Stop requested; aborting download of {abs_url}")
+                                        except Exception:
+                                            pass
+                                        return
                                     time.sleep(0.1)
                                 if chunk:
                                     f.write(chunk)
@@ -1656,7 +2091,8 @@ class DownloaderGUI:
 
     def setup_logger(self, log_dir):
         os.makedirs(log_dir, exist_ok=True)
-        log_path = os.path.join(log_dir, f"epstein_downloader_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+        # Use a single fixed logfile to keep all runs in one canonical location.
+        log_path = os.path.join(log_dir, 'epstein_downloader.log')
         self.log_file = log_path
         self.logger = logging.getLogger("EpsteinFilesDownloader")
         self.logger.setLevel(logging.DEBUG)
@@ -1682,7 +2118,7 @@ class DownloaderGUI:
         status_handler.setLevel(logging.INFO)
         status_handler.setFormatter(formatter)
         self.logger.addHandler(status_handler)
-        self.logger.info("Logger initialized.")
+        self.logger.info(f"Logger initialized. logfile={log_path}")
 
     def thread_safe_status(self, msg):
         # Schedule status update on the main thread, safe for closed mainloop
@@ -1713,22 +2149,22 @@ class DownloaderGUI:
         # Use a unique style name to avoid global side effects
         style.theme_use('clam')  # 'clam' is modern and cross-platform
         style.configure('Modern.Horizontal.TProgressbar',
-                        troughcolor='#e0e0e0' if not self.dark_mode else '#222',
-                        bordercolor='#b0b0b0' if not self.dark_mode else '#444',
-                        background='#4a90e2' if not self.dark_mode else '#6fa8dc',
-                        lightcolor='#4a90e2' if not self.dark_mode else '#6fa8dc',
-                        darkcolor='#357ab7' if not self.dark_mode else '#27496d',
-                        thickness=18,
-                        relief='flat')
+                        troughcolor='#dfeffb' if not self.dark_mode else '#111217',
+                        bordercolor='#8fb5ff' if not self.dark_mode else '#2a2f36',
+                        background='#0078d7' if not self.dark_mode else '#2a6fb0',
+                        lightcolor='#5aa8ff' if not self.dark_mode else '#4e8fb8',
+                        darkcolor='#005bb5' if not self.dark_mode else '#134a75',
+                        thickness=20,
+                        relief='raised')
         # For file progress, use a different color
         style.configure('ModernFile.Horizontal.TProgressbar',
-                        troughcolor='#e0e0e0' if not self.dark_mode else '#222',
-                        bordercolor='#b0b0b0' if not self.dark_mode else '#444',
-                        background='#7ed957' if not self.dark_mode else '#8fd694',
-                        lightcolor='#7ed957' if not self.dark_mode else '#8fd694',
-                        darkcolor='#4e944f' if not self.dark_mode else '#386641',
+                        troughcolor='#f0f9f0' if not self.dark_mode else '#141814',
+                        bordercolor='#9fe39a' if not self.dark_mode else '#25492b',
+                        background='#66c33a' if not self.dark_mode else '#5fa94c',
+                        lightcolor='#98e57a' if not self.dark_mode else '#7fb86a',
+                        darkcolor='#3b8a20' if not self.dark_mode else '#2f6b2f',
                         thickness=14,
-                        relief='flat')
+                        relief='raised')
         # Make window scalable
         self.root.geometry('1100x800')
         self.root.minsize(800, 600)
@@ -1829,6 +2265,12 @@ class DownloaderGUI:
             self.url_listbox.insert(tk.END, url)
         self.add_tooltip(self.url_listbox, "List of URLs to download. Select to remove or view details.")
         self.setup_url_listbox_context_menu()
+        # Dark-mode visual adjustments for URL listbox
+        try:
+            if getattr(self, 'dark_mode', False):
+                self.url_listbox.configure(bg='#1f1f1f', fg='#ffffff', selectbackground='#32414a', selectforeground='#ffffff', highlightthickness=1, highlightbackground='#444')
+        except Exception:
+            pass
         # URL entry and Add button span the full width (entry on left, Add on right)
         self.url_entry = ttk.Entry(url_section, width=60, font=("Segoe UI", 11))
         self.url_entry.grid(row=1, column=0, columnspan=3, sticky="ew", pady=5)
@@ -1921,7 +2363,15 @@ class DownloaderGUI:
                                 for cx1, cy1, cx2, cy2 in corners:
                                     for px in range(cx1, cx2):
                                         for py in range(cy1, cy2):
-                                            samples.append(pil_img.getpixel((px, py))[:3])
+                                            pix = pil_img.getpixel((px, py))
+                                            # pix is (r,g,b,a) from RGBA; ignore fully/mostly transparent samples
+                                            try:
+                                                if len(pix) == 4 and pix[3] > 16:
+                                                    samples.append(pix[:3])
+                                            except Exception:
+                                                # fallback if pixel tuple unexpected
+                                                samples.append(pix[:3])
+                                # Only use corner samples if we found any non-transparent pixels
                                 if samples:
                                     # median to be robust against noise
                                     import statistics
@@ -1948,33 +2398,63 @@ class DownloaderGUI:
                                     pil_img.putdata(new_data)
                             except Exception:
                                 pass
-                            # Convert icon to black-on-transparent: keep dark pixels, fade lighter ones
+                            # Better approach: tint icons using their alpha channel so detail/antialiasing
+                            # is preserved. Create a solid-color image and use the original alpha as mask.
                             try:
-                                datas = list(pil_img.getdata())
-                                new_data = []
-                                # luminance thresholds
-                                dark_max = 100
-                                fade = 80
-                                for item in datas:
-                                    r, g, b, a = item
-                                    # If fully transparent already, keep
-                                    if a == 0:
-                                        new_data.append((0, 0, 0, 0))
-                                        continue
-                                    lum = int(0.299 * r + 0.587 * g + 0.114 * b)
-                                    if lum <= dark_max:
-                                        # solid black
-                                        new_data.append((0, 0, 0, 255))
-                                    elif lum <= dark_max + fade:
-                                        # fade proportionally
-                                        alpha = int(255 * (1.0 - (lum - dark_max) / float(fade)))
-                                        if alpha < 8:
-                                            new_data.append((0, 0, 0, 0))
-                                        else:
-                                            new_data.append((0, 0, 0, alpha))
-                                    else:
-                                        new_data.append((0, 0, 0, 0))
-                                pil_img.putdata(new_data)
+                                use_white = getattr(self, 'dark_mode', False)
+                                fg = (255, 255, 255) if use_white else (0, 0, 0)
+                                # target size slightly smaller for less bulky icons
+                                target_size = (16, 16)
+                                # Ensure we have an alpha mask
+                                mask = pil_img.split()[3] if pil_img.mode == 'RGBA' else None
+                                try:
+                                    pil_img = pil_img.resize(target_size, Image.LANCZOS)
+                                    if mask is not None:
+                                        mask = mask.resize(target_size, Image.LANCZOS)
+                                except Exception:
+                                    pass
+                                try:
+                                    colored = Image.new('RGBA', target_size, fg + (0,))
+                                    # paste foreground color where alpha channel indicates opacity
+                                    colored.paste(fg + (255,), (0, 0), mask)
+                                    pil_img = colored
+                                except Exception:
+                                    pass
+                                # If resulting image is mostly transparent (tinting removed detail),
+                                # create a simple vector fallback for important icons (pause/stop)
+                                try:
+                                    datas2 = list(pil_img.getdata())
+                                    opaque_pixels = sum(1 for (_,_,_,a) in datas2 if a > 16)
+                                    total = len(datas2) if datas2 else 1
+                                    if float(opaque_pixels) / float(total) < 0.05:
+                                        # too few opaque pixels, draw fallback
+                                        from PIL import ImageDraw
+                                        def make_fallback(nm, size, color):
+                                            img = Image.new('RGBA', size, (0,0,0,0))
+                                            draw = ImageDraw.Draw(img)
+                                            w,h = size
+                                            pad = max(2, w//8)
+                                            if nm == 'pause':
+                                                bw = max(2, (w - pad*3)//4)
+                                                x1 = pad
+                                                x2 = x1 + bw
+                                                draw.rectangle([x1, pad, x2, h-pad], fill=color+(255,))
+                                                x1 = x2 + pad
+                                                x2 = x1 + bw
+                                                draw.rectangle([x1, pad, x2, h-pad], fill=color+(255,))
+                                            elif nm == 'stop':
+                                                draw.rectangle([pad, pad, w-pad, h-pad], fill=color+(255,))
+                                            elif nm == 'start':
+                                                # triangle
+                                                draw.polygon([(pad, pad), (w-pad, h//2), (pad, h-pad)], fill=color+(255,))
+                                            else:
+                                                draw.ellipse([pad, pad, w-pad, h-pad], fill=color+(255,))
+                                            return img
+                                        basename = name.lower()
+                                        if basename in ('pause','stop','start'):
+                                            pil_img = make_fallback(basename, target_size, fg)
+                                except Exception:
+                                    pass
                             except Exception:
                                 pass
                             img = ImageTk.PhotoImage(pil_img, master=self.root)
@@ -2005,12 +2485,24 @@ class DownloaderGUI:
 
         self.download_btn = ttk.Button(action_section, text="Start Download", command=self.start_download_all_thread, image=start_icon, compound='left')
         self.download_btn.grid(row=0, column=0, pady=5, padx=(0, 8), sticky="ew")
+        try:
+            self.download_btn.bind('<Button-1>', lambda e: self.log_button_event('Start Download', e))
+        except Exception:
+            pass
         self.add_tooltip(self.download_btn, "Start downloading all files from the URLs above (runs in background, UI stays responsive)")
         self.pause_btn = ttk.Button(action_section, text="Pause", command=self.pause_downloads, image=pause_icon, compound='left')
         self.pause_btn.grid(row=0, column=1, pady=5, padx=(0, 8), sticky="ew")
+        try:
+            self.pause_btn.bind('<Button-1>', lambda e: self.log_button_event('Pause', e))
+        except Exception:
+            pass
         self.add_tooltip(self.pause_btn, "Pause all downloads in progress.")
         self.resume_btn = ttk.Button(action_section, text="Resume", command=self.resume_downloads, state='disabled', image=resume_icon, compound='left')
         self.resume_btn.grid(row=0, column=2, pady=5, padx=(0, 8), sticky="ew")
+        try:
+            self.resume_btn.bind('<Button-1>', lambda e: self.log_button_event('Resume', e))
+        except Exception:
+            pass
         self.add_tooltip(self.resume_btn, "Resume paused downloads.")
         self.schedule_btn = ttk.Button(action_section, text="Schedule", command=self.open_schedule_window, image=schedule_icon, compound='left')
         self.schedule_btn.grid(row=0, column=3, pady=5, padx=(0, 8), sticky="ew")
@@ -2024,12 +2516,25 @@ class DownloaderGUI:
 
         # Stop / Enable scans controls
         stop_icon = load_icon("stop")
-        self.stop_scan_btn = ttk.Button(action_section, text="Stop Scans", command=self.stop_scans, image=stop_icon, compound='left')
+        self.stop_scan_btn = ttk.Button(action_section, text="Stop", command=self.stop_all, image=stop_icon, compound='left')
         self.stop_scan_btn.grid(row=1, column=2, pady=5, padx=(0, 8), sticky='ew')
-        self.add_tooltip(self.stop_scan_btn, "Stop all future scanning of existing files and cancel any running scan")
+        try:
+            self.stop_scan_btn.bind('<Button-1>', lambda e: self.log_button_event('Stop', e))
+        except Exception:
+            pass
+        self.add_tooltip(self.stop_scan_btn, "Stop all activity: downloads, scans, and background workers")
         self.enable_scan_btn = ttk.Button(action_section, text="Enable Scans", command=self.enable_scans, state='disabled')
         self.enable_scan_btn.grid(row=1, column=3, pady=5, padx=(0, 8), sticky='ew')
-        self.add_tooltip(self.enable_scan_btn, "Re-enable scanning of existing files (undo Stop Scans)")
+        try:
+            self.enable_scan_btn.bind('<Button-1>', lambda e: self.log_button_event('Enable Scans', e))
+        except Exception:
+            pass
+        self.add_tooltip(self.enable_scan_btn, "Re-enable scanning and resume activity (undo Stop)")
+        # keep a reference to the original handler so we can restore it after a Reset
+        try:
+            self._orig_enable_scan_cmd = self.enable_scan_btn['command'] if 'command' in self.enable_scan_btn.keys() else self.enable_scans
+        except Exception:
+            self._orig_enable_scan_cmd = self.enable_scans
 
         # --- Progress Section ---
         progress_section = ttk.LabelFrame(self.frame, text="Progress", padding=(15, 10))
@@ -2050,6 +2555,44 @@ class DownloaderGUI:
         self.speed_eta_label = ttk.Label(progress_section, textvariable=self.speed_eta_var, font=("Segoe UI", 11))
         self.speed_eta_label.grid(row=2, column=0, columnspan=4, sticky="w", pady=(0, 5))
         self.add_tooltip(self.speed_eta_label, "Shows current download speed and estimated time remaining for the current file.")
+        # Animated spinner (hidden by default) to indicate active downloads
+        # Two small balls (blue and red) orbiting to create a lively spinner
+        # Determine a safe background color from ttk style, fallback to light/dark defaults
+        style = ttk.Style()
+        bg = style.lookup('TLabelFrame', 'background') or style.lookup('TFrame', 'background') or ('#111217' if self.dark_mode else '#f0f0f0')
+        self._spinner_canvas = tk.Canvas(progress_section, width=32, height=32, highlightthickness=0, bg=bg)
+        # center and orbit radius
+        self._spinner_cx = 16
+        self._spinner_cy = 16
+        self._spinner_r = 10
+        # initial angle
+        import math
+        a1 = 0
+        a2 = math.pi
+        # ball size
+        bsize = 6
+        x1 = int(self._spinner_cx + self._spinner_r * math.cos(a1))
+        y1 = int(self._spinner_cy + self._spinner_r * math.sin(a1))
+        x2 = int(self._spinner_cx + self._spinner_r * math.cos(a2))
+        y2 = int(self._spinner_cy + self._spinner_r * math.sin(a2))
+        # Determine outline for dark mode so colored balls remain readable
+        try:
+            _outline_col = '#ffffff' if getattr(self, 'dark_mode', False) else ''
+            _outline_w = 1 if getattr(self, 'dark_mode', False) else 0
+        except Exception:
+            _outline_col = ''
+            _outline_w = 0
+        self._spinner_ball1 = self._spinner_canvas.create_oval(x1 - bsize//2, y1 - bsize//2, x1 + bsize//2, y1 + bsize//2, fill='#0078d7', outline=_outline_col, width=_outline_w)
+        self._spinner_ball2 = self._spinner_canvas.create_oval(x2 - bsize//2, y2 - bsize//2, x2 + bsize//2, y2 + bsize//2, fill='#d9483f', outline=_outline_col, width=_outline_w)
+        self._spinner_canvas.grid(row=0, column=4, rowspan=3, padx=(8,0), sticky='e')
+        self._spinner_running = False
+        self._spinner_angle = 0.0
+        self._spinner_job = None
+        # Hide spinner initially
+        try:
+            self._spinner_canvas.grid_remove()
+        except Exception:
+            pass
 
         # --- Status Pane Group ---
         import tkinter.scrolledtext as st
@@ -2063,6 +2606,13 @@ class DownloaderGUI:
         self.status_pane.grid(row=1, column=0, columnspan=4, sticky="nsew", pady=(0, 5))
         self.add_tooltip(self.status_pane, "Log and status output. Shows download progress, errors, and info.")
         self.status_pane_visible = True
+
+        # Dark-mode styling for status pane (lighter black background, white text)
+        try:
+            if getattr(self, 'dark_mode', False):
+                self.status_pane.configure(background='#1f1f1f', foreground='#ffffff', insertbackground='#ffffff')
+        except Exception:
+            pass
 
         # Make widgets expand with window
         for i in range(4):
@@ -2080,9 +2630,18 @@ class DownloaderGUI:
         status_frame = ttk.Frame(self.root)
         status_frame.grid(row=1, column=0, sticky='ew')
         status_frame.columnconfigure(1, weight=1)
-        self.status_bar = ttk.Label(status_frame, textvariable=self.status, relief=tk.SUNKEN, anchor='w', foreground='blue')
+        # Bottom status labels: use explicit colors in dark mode for contrast
+        try:
+            if getattr(self, 'dark_mode', False):
+                self.status_bar = tk.Label(status_frame, textvariable=self.status, relief=tk.SUNKEN, anchor='w', foreground='#7fbcff', background='#111217')
+                self.summary_bar = tk.Label(status_frame, textvariable=self.summary_var, relief=tk.SUNKEN, anchor='e', foreground='#7fe57a', background='#111217')
+            else:
+                self.status_bar = tk.Label(status_frame, textvariable=self.status, relief=tk.SUNKEN, anchor='w', foreground='blue')
+                self.summary_bar = tk.Label(status_frame, textvariable=self.summary_var, relief=tk.SUNKEN, anchor='e', foreground='green')
+        except Exception:
+            self.status_bar = tk.Label(status_frame, textvariable=self.status, relief=tk.SUNKEN, anchor='w')
+            self.summary_bar = tk.Label(status_frame, textvariable=self.summary_var, relief=tk.SUNKEN, anchor='e')
         self.status_bar.grid(row=0, column=0, sticky='ew')
-        self.summary_bar = ttk.Label(status_frame, textvariable=self.summary_var, relief=tk.SUNKEN, anchor='e', foreground='green')
         self.summary_bar.grid(row=0, column=1, sticky='ew')
         self.add_tooltip(self.status_bar, "Persistent status bar. Shows the latest status message.")
         self.add_tooltip(self.summary_bar, "Summary: queued, completed, failed counts.")
@@ -2094,6 +2653,14 @@ class DownloaderGUI:
         dark_btn = ttk.Button(self.frame, text="Toggle Dark Mode", command=self.toggle_dark_mode)
         dark_btn.grid(row=13, column=3, sticky="e", pady=(10, 0))
         self.add_tooltip(dark_btn, "Switch between light and dark mode")
+        # Quick Help button and F1 binding
+        help_quick = ttk.Button(self.frame, text="Help / About", command=self.show_help_dialog)
+        help_quick.grid(row=13, column=1, sticky="e", pady=(10,0))
+        self.add_tooltip(help_quick, "Open Help and About")
+        try:
+            self.root.bind('<F1>', lambda e: self.show_help_dialog())
+        except Exception:
+            pass
 
     def update_summary_bar(self, queued=None, completed=None, failed=None):
         # Update the summary bar with current counts
@@ -2165,46 +2732,103 @@ class DownloaderGUI:
             self.history_text.delete('1.0', tk.END)
             self.history_text.insert(tk.END, f"Failed to read log file: {e}")
             self.history_text.configure(state='disabled')
+    
     def pause_downloads(self):
         """Pause all downloads and background activity."""
-        if not self._is_paused:
-            self._pause_event.clear()
-            self._is_paused = True
-            self.status.set("Paused. Click Resume to continue.")
-            # Disable pause to avoid repeats; enable resume
+        try:
+            # Log entry state and stack trace
             try:
-                self.pause_btn.config(state='disabled', text='Paused')
-                # swap icon to paused variant if available
-                if 'pause' in self._images:
-                    self.pause_btn.config(image=self._images.get('pause'))
-                self.resume_btn.config(state='normal')
+                import traceback
+                stack = ''.join(traceback.format_stack())
+                self.logger.debug(f"pause_downloads() called. _is_paused={getattr(self, '_is_paused', None)}, _pause_event_is_set={getattr(self, '_pause_event').is_set() if hasattr(self, '_pause_event') else 'NA'}, _scans_disabled={getattr(self, '_scans_disabled', None)}, _scanning={getattr(self, '_scanning', False)}")
+                self.logger.debug(f"pause_downloads() call stack:\n{stack}")
             except Exception:
-                pass
+                self.logger.debug("pause_downloads() called. (failed to read some internal state)")
+            if not getattr(self, '_is_paused', False):
+                self._pause_event.clear()
+                self._is_paused = True
+                self.status.set("Paused. Click Resume to continue.")
+                # Disable pause to avoid repeats; enable resume
+                try:
+                    self.pause_btn.config(state='disabled', text='Paused')
+                    # swap icon to paused variant if available
+                    if 'pause' in self._images:
+                        self.pause_btn.config(image=self._images.get('pause'))
+                    self.resume_btn.config(state='normal')
+                except Exception:
+                    self.logger.exception("Failed to update pause/resume button states in pause_downloads")
+                try:
+                    self.logger.info("Pausing all activity (user request).")
+                except Exception:
+                    pass
+                self.thread_safe_status("All activity paused.")
+            else:
+                self.logger.info("pause_downloads() called but already paused.")
+            # Log exit state
             try:
-                self.logger.info("Pausing all activity (user request).")
+                self.logger.debug(f"pause_downloads() exit. _is_paused={getattr(self, '_is_paused', None)}, _pause_event_is_set={getattr(self, '_pause_event').is_set() if hasattr(self, '_pause_event') else 'NA'}, pause_btn_state={self.pause_btn.cget('state') if hasattr(self, 'pause_btn') else 'NA'}, resume_btn_state={self.resume_btn.cget('state') if hasattr(self, 'resume_btn') else 'NA'}")
             except Exception:
-                pass
-            self.thread_safe_status("All activity paused.")
+                self.logger.debug("pause_downloads() exit. (failed to read some UI state)")
+        except Exception as e:
+            self.logger.exception(f"Exception in pause_downloads: {e}")
 
     def resume_downloads(self):
         """Resume paused downloads."""
-        if self._is_paused:
-            self._pause_event.set()
-            self._is_paused = False
-            self.status.set("Resumed. Downloads continuing.")
+        try:
+            # Log entry state and stack trace
             try:
-                self.pause_btn.config(state='normal', text='Pause')
-                # restore pause icon
-                if 'pause' in self._images:
-                    self.pause_btn.config(image=self._images.get('pause'))
-                self.resume_btn.config(state='disabled')
+                import traceback
+                stack = ''.join(traceback.format_stack())
+                self.logger.debug(f"resume_downloads() called. _is_paused={getattr(self, '_is_paused', None)}, _pause_event_is_set={getattr(self, '_pause_event').is_set() if hasattr(self, '_pause_event') else 'NA'}")
+                self.logger.debug(f"resume_downloads() call stack:\n{stack}")
             except Exception:
-                pass
+                self.logger.debug("resume_downloads() called. (failed to read some internal state)")
+            if getattr(self, '_is_paused', False):
+                self._pause_event.set()
+                self._is_paused = False
+                # Clear any stop request so activity may continue
+                try:
+                    if getattr(self, '_stop_event', None):
+                        self._stop_event.clear()
+                    self._is_stopped = False
+                except Exception:
+                    pass
+                # Also re-enable scanning when resuming
+                try:
+                    self._scans_disabled = False
+                    try:
+                        self.stop_scan_btn.config(state='normal')
+                    except Exception:
+                        pass
+                    try:
+                        self.enable_scan_btn.config(state='disabled')
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                self.status.set("Resumed. Downloads continuing.")
+                try:
+                    self.pause_btn.config(state='normal', text='Pause')
+                    # restore pause icon
+                    if 'pause' in self._images:
+                        self.pause_btn.config(image=self._images.get('pause'))
+                    self.resume_btn.config(state='disabled')
+                except Exception:
+                    self.logger.exception("Failed to update pause/resume button states in resume_downloads")
+                try:
+                    self.logger.info("Resumed all activity (user request).")
+                except Exception:
+                    pass
+                self.thread_safe_status("Resumed all activity.")
+            else:
+                self.logger.info("resume_downloads() called but not currently paused.")
+            # Log exit state
             try:
-                self.logger.info("Resumed all activity (user request).")
+                self.logger.debug(f"resume_downloads() exit. _is_paused={getattr(self, '_is_paused', None)}, _pause_event_is_set={getattr(self, '_pause_event').is_set() if hasattr(self, '_pause_event') else 'NA'}, pause_btn_state={self.pause_btn.cget('state') if hasattr(self, 'pause_btn') else 'NA'}, resume_btn_state={self.resume_btn.cget('state') if hasattr(self, 'resume_btn') else 'NA'}")
             except Exception:
-                pass
-            self.thread_safe_status("Resumed all activity.")
+                self.logger.debug("resume_downloads() exit. (failed to read some UI state)")
+        except Exception as e:
+            self.logger.exception(f"Exception in resume_downloads: {e}")
 
 
     def remove_url(self):
@@ -2249,25 +2873,12 @@ class DownloaderGUI:
         widget.bind("<Leave>", on_leave)
 
     def toggle_dark_mode(self):
-        # Simple dark mode toggle for ttk widgets
-        self.dark_mode = not self.dark_mode
-        style = ttk.Style()
+        # Toggle dark mode and apply via set_theme to keep progressbar styles consistent
+        self.dark_mode = not getattr(self, 'dark_mode', False)
         if self.dark_mode:
-            style.theme_use("clam")
-            style.configure("TFrame", background="#222")
-            style.configure("TLabel", background="#222", foreground="#eee")
-            style.configure("TLabelFrame", background="#222", foreground="#eee")
-            style.configure("TButton", background="#333", foreground="#eee")
-            style.configure("TEntry", fieldbackground="#333", foreground="#eee")
-            style.configure("TProgressbar", background="#444")
+            self.set_theme('clam')
         else:
-            style.theme_use("clam")
-            style.configure("TFrame", background="#f0f0f0")
-            style.configure("TLabel", background="#f0f0f0", foreground="#222")
-            style.configure("TLabelFrame", background="#f0f0f0", foreground="#222")
-            style.configure("TButton", background="#e0e0e0", foreground="#222")
-            style.configure("TEntry", fieldbackground="#fff", foreground="#222")
-            style.configure("TProgressbar", background="#0078d7")
+            self.set_theme('default')
 
     def add_url(self):
         url = self.url_entry.get().strip()
@@ -2406,9 +3017,22 @@ class DownloaderGUI:
                 page = context.new_page()
                 failed_count = 0
                 while not url_queue.empty():
-                    # Pause support
+                    # Pause support (allow stop to break out)
                     while not self._pause_event.is_set():
+                        if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+                            try:
+                                self.logger.info('Stop requested; exiting download queue loop.')
+                            except Exception:
+                                pass
+                            return
                         time.sleep(0.1)
+                    # Also check stop again before dequeuing and processing
+                    if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+                        try:
+                            self.logger.info('Stop requested; breaking out of download queue.')
+                        except Exception:
+                            pass
+                        break
                     url = url_queue.get()
                     if url in seen_urls:
                         # Already processed (from dynamic add)
@@ -2485,8 +3109,11 @@ class DownloaderGUI:
                     file_id = file_info['id']
                     file_name = file_info['name']
                     dest_path = os.path.join(output_dir, file_name)
-                    # Pause support
+                    # Pause support (allow stop to abort batch)
                     while hasattr(self, '_pause_event') and not self._pause_event.is_set():
+                        if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+                            logger.info('Stop requested; aborting Google Drive batch download.')
+                            return result
                         time.sleep(0.1)
                     logger.info(f"Downloading Google Drive file: {file_name} to {dest_path}")
                     try:
@@ -2511,8 +3138,11 @@ class DownloaderGUI:
                         file_id = file_info['id']
                         file_name = file_info['name']
                         dest_path = os.path.join(subfolder_output, file_name)
-                        # Pause support
+                        # Pause support (allow stop to abort)
                         while hasattr(self, '_pause_event') and not self._pause_event.is_set():
+                            if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+                                logger.info('Stop requested; aborting Google Drive subfolder download.')
+                                return result
                             time.sleep(0.1)
                         logger.info(f"Downloading Google Drive file: {file_name} to {dest_path}")
                         try:
@@ -2614,6 +3244,13 @@ class DownloaderGUI:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_idx = {executor.submit(hash_file_worker, path): idx for idx, path in enumerate(all_files)}
             for count, future in enumerate(as_completed(future_to_idx), 1):
+                # Pause support for long-running scan; respect full stop requests
+                while not self._pause_event.is_set():
+                    if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+                        # Convert stop to a cancel_scan so existing logic cleans up
+                        self._cancel_scan = True
+                        break
+                    time.sleep(0.1)
                 if getattr(self, '_cancel_scan', False):
                     self.logger.info('Scan canceled by user.')
                     break
@@ -2687,6 +3324,11 @@ class DownloaderGUI:
         import threading
         def run():
             self.thread_safe_status("Starting download...")
+            # Show animated spinner while downloads are active
+            try:
+                self.root.after(0, self.start_spinner)
+            except Exception:
+                pass
             urls = list(self.urls)
             base_dir = self.base_dir.get()
             base_dir_cmp = base_dir.lower()
@@ -2760,6 +3402,10 @@ class DownloaderGUI:
                     context = browser.new_context()
                     page = context.new_page()
                     for i, url in enumerate(urls):
+                        # Allow a Stop request to abort the download loop
+                        if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+                            self.logger.info('Stop requested; aborting remaining URL processing in download_all.')
+                            break
                         self.thread_safe_status(f"Visiting: {url}")
                         self.logger.info(f"Visiting: {url}")
                         self.progress['value'] = i
@@ -2807,52 +3453,62 @@ class DownloaderGUI:
                 self.logger.error(f"Failed to save JSON: {e}")
                 self.root.after(0, lambda e=e: messagebox.showerror("Error", f"Failed to save JSON: {e}"))
             self.downloaded_json.set(json_path)
-            # Check for missing files
-            missing_files = []
-            for url in all_files:
-                if url.startswith('gdrive://'):
-                    rel_path = url.replace('gdrive://', '')
-                    local_path = os.path.join(base_dir, 'GoogleDrive', rel_path)
-                else:
-                    rel_path = self.sanitize_path(url.replace('https://', ''))
-                    local_path = os.path.join(base_dir, rel_path)
-                if not os.path.exists(local_path):
-                    missing_files.append((url, local_path))
-            if missing_files:
-                self.thread_safe_status(f"Downloading {len(missing_files)} missing files...")
-                self.logger.warning(f"{len(missing_files)} missing files detected. Retrying...")
-                for url, local_path in missing_files:
-                    try:
-                        os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                        if url.startswith('gdrive://'):
-                            # Redownload Google Drive file by name (not implemented: would require mapping rel_path to file_id)
-                            self.logger.error(f"Cannot redownload missing Google Drive file automatically: {url}")
-                        else:
-                            proxies = None
-                            if self.config.get('proxy'):
-                                proxies = {"http": self.config['proxy'], "https": self.config['proxy']}
-                            speed_limit = int(self.config.get('speed_limit_kbps', 0))
-                            with requests.get(url, stream=True, proxies=proxies) as r:
-                                r.raise_for_status()
-                                with open(local_path, 'wb') as f:
-                                    downloaded = 0
-                                    start_time = time.time()
-                                    for chunk in r.iter_content(chunk_size=8192):
-                                        if chunk:
-                                            f.write(chunk)
-                                            downloaded += len(chunk)
-                                            if speed_limit > 0:
-                                                elapsed = time.time() - start_time
-                                                expected_time = downloaded / (speed_limit * 1024)
-                                                if elapsed < expected_time:
-                                                    time.sleep(expected_time - elapsed)
-                            self.logger.info(f"Successfully downloaded missing file: {url}")
-                    except Exception as e:
-                        self.logger.error(f"Failed to download missing file {url}: {e}")
-                self.thread_safe_status("Download complete (with missing files retried).")
+            # If a Stop was requested, skip missing-file retries and finish early
+            if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+                self.thread_safe_status('Stopped by user. Skipping missing-file retries.')
+                self.logger.info('Skipping missing-file retry due to user stop request.')
             else:
-                self.thread_safe_status("Download complete. No missing files.")
-                self.logger.info("No missing files after download.")
+                # Check for missing files
+                missing_files = []
+                for url in all_files:
+                    if url.startswith('gdrive://'):
+                        rel_path = url.replace('gdrive://', '')
+                        local_path = os.path.join(base_dir, 'GoogleDrive', rel_path)
+                    else:
+                        rel_path = self.sanitize_path(url.replace('https://', ''))
+                        local_path = os.path.join(base_dir, rel_path)
+                    if not os.path.exists(local_path):
+                        missing_files.append((url, local_path))
+                if missing_files:
+                    self.thread_safe_status(f"Downloading {len(missing_files)} missing files...")
+                    self.logger.warning(f"{len(missing_files)} missing files detected. Retrying...")
+                    for url, local_path in missing_files:
+                        try:
+                            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                            if url.startswith('gdrive://'):
+                                # Redownload Google Drive file by name (not implemented: would require mapping rel_path to file_id)
+                                self.logger.error(f"Cannot redownload missing Google Drive file automatically: {url}")
+                            else:
+                                proxies = None
+                                if self.config.get('proxy'):
+                                    proxies = {"http": self.config['proxy'], "https": self.config['proxy']}
+                                speed_limit = int(self.config.get('speed_limit_kbps', 0))
+                                with requests.get(url, stream=True, proxies=proxies) as r:
+                                    r.raise_for_status()
+                                    with open(local_path, 'wb') as f:
+                                        downloaded = 0
+                                        start_time = time.time()
+                                        for chunk in r.iter_content(chunk_size=8192):
+                                            if chunk:
+                                                f.write(chunk)
+                                                downloaded += len(chunk)
+                                                if speed_limit > 0:
+                                                    elapsed = time.time() - start_time
+                                                    expected_time = downloaded / (speed_limit * 1024)
+                                                    if elapsed < expected_time:
+                                                        time.sleep(expected_time - elapsed)
+                                self.logger.info(f"Successfully downloaded missing file: {url}")
+                        except Exception as e:
+                            self.logger.error(f"Failed to download missing file {url}: {e}")
+                    self.thread_safe_status("Download complete (with missing files retried).")
+                else:
+                    self.thread_safe_status("Download complete. No missing files.")
+                    self.logger.info("No missing files after download.")
+            # Ensure spinner is stopped regardless of outcome
+            try:
+                self.root.after(0, self.stop_spinner)
+            except Exception:
+                pass
         threading.Thread(target=run, daemon=True).start()
 
     def download_files(self, page, base_url, base_dir, visited=None, skipped_files=None, file_tree=None, all_files=None):
@@ -2872,6 +3528,13 @@ class DownloaderGUI:
         if base_url in visited:
             return skipped_files, file_tree, all_files
         visited.add(base_url)
+        # Respect a global stop request before starting heavy work
+        if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+            try:
+                self.logger.info(f"Stop requested; aborting traversal of {base_url}")
+            except Exception:
+                pass
+            return skipped_files, file_tree, all_files
         self.thread_safe_status(f"Visiting: {base_url}")
         try:
             page.goto(base_url)
@@ -2882,6 +3545,13 @@ class DownloaderGUI:
         self.thread_safe_status(f"Found {len(links)} links on {base_url}")
         hrefs = []
         for link in links:
+            # Allow Stop to break traversal immediately
+            if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+                try:
+                    self.logger.info(f"Stop requested; aborting link collection on {base_url}")
+                except Exception:
+                    pass
+                break
             try:
                 href = link.get_attribute('href')
                 if href:
@@ -2893,6 +3563,12 @@ class DownloaderGUI:
         download_tasks = []
         download_info = []  # (abs_url, local_path, folder)
         for href in hrefs:
+            if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+                try:
+                    self.logger.info(f"Stop requested; aborting file/link loop on {base_url}")
+                except Exception:
+                    pass
+                break
             if href.startswith('#'):
                 continue
             abs_url = urllib.parse.urljoin(base_url, href)
@@ -2900,6 +3576,15 @@ class DownloaderGUI:
             if '/search' in abs_url:
                 continue
             if re.search(r'\.(pdf|docx?|xlsx?|zip|txt|jpg|png|csv|mp4|mov|avi|wmv|wav|mp3|m4a)$', abs_url, re.IGNORECASE):
+                # Pause support for file processing (makes Pause more responsive)
+                while not self._pause_event.is_set():
+                    if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+                        try:
+                            self.logger.info(f"Stop requested; aborting file processing for {abs_url}")
+                        except Exception:
+                            pass
+                        return skipped_files, file_tree, all_files
+                    time.sleep(0.05)
                 rel_path = self.sanitize_path(abs_url.replace('https://', ''))
                 local_path = os.path.join(base_dir, rel_path)
                 folder = os.path.dirname(local_path)
@@ -2951,8 +3636,14 @@ class DownloaderGUI:
             max_retries = 3
             delay = 2
             for attempt in range(1, max_retries + 1):
-                # Pause support
+                # Pause support (also exit if a full stop is requested)
                 while not self._pause_event.is_set():
+                    if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+                        try:
+                            self.logger.info(f"Stop requested; aborting download task for {abs_url}")
+                        except Exception:
+                            pass
+                        return
                     time.sleep(0.1)
                 try:
                     os.makedirs(os.path.dirname(local_path), exist_ok=True)
@@ -2967,6 +3658,12 @@ class DownloaderGUI:
                         with open(local_path, 'wb') as f:
                             for chunk in r.iter_content(chunk_size=8192):
                                 while not self._pause_event.is_set():
+                                    if getattr(self, '_stop_event', None) and self._stop_event.is_set():
+                                        try:
+                                            self.logger.info(f"Stop requested; aborting download of {abs_url}")
+                                        except Exception:
+                                            pass
+                                        return
                                     time.sleep(0.1)
                                 if chunk:
                                     f.write(chunk)
