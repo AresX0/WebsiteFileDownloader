@@ -2619,8 +2619,6 @@ class DownloaderGUI:
                     lambda m=msg: messagebox.showerror(
                         "Validate Credentials", m
                     ),
-                        "Validate Credentials", m
-                    ),
                 )
 
         threading.Thread(target=do_validate, daemon=True).start()
@@ -5688,5 +5686,28 @@ def main():
 
 
 if __name__ == "__main__":
+    # Special command-line helpers for installer/post-install operations.
+    if "--install-prereqs" in sys.argv:
+        try:
+            logging.getLogger("EpsteinFilesDownloader").info("Installing runtime prerequisites...")
+            ensure_runtime_dependencies(root=None, skip_if_env=False)
+            logging.getLogger("EpsteinFilesDownloader").info("Runtime prerequisites installed.")
+            print("OK: runtime prerequisites installed")
+            sys.exit(0)
+        except Exception as e:
+            logging.getLogger("EpsteinFilesDownloader").exception("Failed to install prerequisites: %s", e)
+            print(f"ERROR: {e}")
+            sys.exit(2)
+    if "--install-browsers" in sys.argv:
+        try:
+            logging.getLogger("EpsteinFilesDownloader").info("Installing Playwright browsers (chromium)...")
+            ensure_playwright_browsers()
+            logging.getLogger("EpsteinFilesDownloader").info("Playwright browsers installed.")
+            print("OK: playwright browsers installed")
+            sys.exit(0)
+        except Exception as e:
+            logging.getLogger("EpsteinFilesDownloader").exception("Failed to install Playwright browsers: %s", e)
+            print(f"ERROR: {e}")
+            sys.exit(3)
     logging.getLogger("EpsteinFilesDownloader").info("Starting main()...")
     main()
