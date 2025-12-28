@@ -4,7 +4,11 @@ sys.path.insert(0, str(repo))
 import epstein_downloader_gui as edg
 import tkinter as tk
 import tkinter.messagebox as mb
-r = tk.Tk(); r.withdraw()
+import pytest
+try:
+    r = tk.Tk(); r.withdraw()
+except tk.TclError:
+    pytest.skip("Skipping UI tests - Tcl/Tk not available", allow_module_level=True)
 app = edg.DownloaderGUI(r)
 # Save baseline
 app.save_config()

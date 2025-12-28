@@ -200,6 +200,9 @@ def install_dependencies_with_progress(root=None):
             if root is not None and getattr(root, "after", None):
                 try:
                     root.after(100, _poll)
+                except Exception:
+                    pass
+                pass
             # Still running; poll again shortly
             if root is not None and getattr(root, "after", None):
                 try:
@@ -234,6 +237,9 @@ def install_dependencies_with_progress(root=None):
     if root is not None and getattr(root, "after", None):
         try:
             root.after(50, _poll)
+        except Exception:
+            pass
+        pass
     # Start polling
     if root is not None and getattr(root, "after", None):
         try:
@@ -1192,6 +1198,10 @@ class DownloaderGUI:
 
     def load_config(self):
         try:
+            # Prefer a config.json in the current working directory when present (helps tests and local overrides)
+            cwd_config = os.path.join(os.getcwd(), "config.json")
+            if os.path.exists(cwd_config):
+                self.config_path = cwd_config
             self.logger.debug(f"Loading config from {self.config_path}")
             with open(self.config_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -2049,7 +2059,9 @@ class DownloaderGUI:
             self.base_dir.set(download_var.get())
             self.log_dir = log_var.get()
             os.makedirs(self.log_dir, exist_ok=True)
+            self.logger.debug(f"save_and_close: cred_entry value='{cred_var.get()}'")
             self.credentials_path = cred_var.get() if cred_var.get() else None
+            self.logger.debug(f"save_and_close: self.credentials_path set to {self.credentials_path}")
             # Try to load credentials immediately so changes apply without restart
             try:
                 self.reload_credentials(self.credentials_path)
@@ -2658,6 +2670,7 @@ class DownloaderGUI:
                         ),
                     )
                 except Exception as e:
+                    pass
                 except Exception:
                     self.root.after(
                         0,
@@ -2667,6 +2680,7 @@ class DownloaderGUI:
                         ),
                     )
             except Exception as e:
+                pass
             except Exception:
                 self.root.after(
                     0,
