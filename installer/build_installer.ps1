@@ -20,17 +20,24 @@ Notes:
 param(
     [switch]$InstallDeps,
     [switch]$Clean,
-    [switch]$IncludePlaywrightBrowsers
+    # Default to including Playwright browsers to produce a self-contained installer
+    [switch]$IncludePlaywrightBrowsers = $true
 )
 
-# Ensure we operate from the expected project directory
-$RepoRoot = "C:\Projects\Website Downloader"
-if (-not (Test-Path $RepoRoot)) {
-    Write-Error "Expected repo root '$RepoRoot' not found. Update the script or run from the correct directory."
+# Ensure we operate from the expected project directory (strict guard)
+$ExpectedRepoRoot = "C:\Projects\Website Downloader"
+$Current = (Get-Location).ProviderPath
+if ($Current -ne $ExpectedRepoRoot -and -not (Test-Path "$ExpectedRepoRoot")) {
+    Write-Error "Expected repo root '$ExpectedRepoRoot' not found. Please clone or move the repository to that path and run the script from there."
+    exit 1
+}
+if ($Current -ne $ExpectedRepoRoot -and $env:EPISTEIN_ALLOW_PATH_OVERRIDE -ne "1") {
+    Write-Error "Build must be run from '$ExpectedRepoRoot'. To override (advanced), set EPISTEIN_ALLOW_PATH_OVERRIDE=1."
     exit 1
 }
 
-Push-Location $RepoRoot
+# Move to the repo root to ensure deterministic behavior
+Push-Location $ExpectedRepoRoot
 Write-Host "Working directory: $(Get-Location)"
 
 $python = "python"
