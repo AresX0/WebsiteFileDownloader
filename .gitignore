@@ -17,7 +17,23 @@ credentials.json
 backups/
 
 # Ignore build artifacts and executable distributions
+build/
 dist/
 bin/
 *.exe
 *.bundle
+
+# Installer / packaging outputs
+installer/output/
+installer/inno/installer/output/
+
+# Playwright browsers in dist
+dist/**/playwright_browsers/
+
+# Virtual envs
+.venv/
+venv/
+
+# Logs and test artifacts
+test_logs/
+*.log
