@@ -153,6 +153,7 @@ LAST_INSTALLER_CANCEL_EVENT = None
 
 
 def install_dependencies_with_progress(root=None):
+    _write_startup_debug('INSTALLER_UI_START')
     """Show a modal installer UI while ensuring runtime dependencies.
 
     This delegates to `ensure_runtime_dependencies()` for the actual install logic and
@@ -388,6 +389,7 @@ def check_and_install(package, pip_name=None, timeout=None):
 
 
 def ensure_playwright_browsers():
+    _write_startup_debug('ENSURE_PLAYWRIGHT_BROWSERS_START')
     """Ensure Playwright browser binaries are installed. May raise on failure.
 
     This function will honor a bundled copy of the Playwright browser binaries when
@@ -5584,6 +5586,12 @@ class DownloaderGUI:
 
 
 def main():
+    # Startup debug trace to help diagnose spawn issues
+    try:
+        _write_startup_debug(f"MAIN_START sys.argv={sys.argv} frozen={getattr(sys, 'frozen', False)} env_skip_install={os.environ.get('EPISTEIN_SKIP_INSTALL')} env_headless={os.environ.get('EPSTEIN_HEADLESS')}")
+    except Exception:
+        pass
+
     # Ensure single instance: create an exclusive lock in the temp dir. If lock exists, exit cleanly.
     lock = None
     try:
