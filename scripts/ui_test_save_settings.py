@@ -3,7 +3,11 @@ repo = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(repo))
 import epstein_downloader_gui as edg
 import tkinter as tk
-r = tk.Tk(); r.withdraw()
+import pytest
+try:
+    r = tk.Tk(); r.withdraw()
+except tk.TclError:
+    pytest.skip("Skipping UI tests - Tcl/Tk not available", allow_module_level=True)
 app = edg.DownloaderGUI(r)
 # Open settings dialog
 app.open_settings_dialog()

@@ -17,6 +17,7 @@ else:
     # Additionally introspect source for class definitions
     import ast
     src = open(os.path.join(root, 'epstein_downloader_gui.py'), 'r', encoding='utf-8').read()
+    src = src.lstrip('\ufeff')
     tree = ast.parse(src)
     classes = [n.name for n in tree.body if isinstance(n, ast.ClassDef)]
     print('Classes in source AST:', classes)
