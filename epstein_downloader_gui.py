@@ -1,4 +1,4 @@
-# EpsteinFilesDownloader v1.0.0
+﻿# EpsteinFilesDownloader v1.0.0
 # (C) 2025 - Refactored for clarity, maintainability, and efficiency
 
 __version__ = "1.0.0"
@@ -6191,10 +6191,22 @@ class DownloaderGUI:
         file_menu.add_command(label="Export Settings...", command=self.export_settings)
         file_menu.add_command(label="Import Settings...", command=self.import_settings)
         file_menu.add_separator()
-        file_menu.add_command(label="Settings Dialog...", command=self.open_settings_dialog)
+        # Move Settings out of File into its own top-level menu for clarity
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.root.quit)
         menubar.add_cascade(label="File", menu=file_menu)
+
+        # Settings menu (top-level)
+        settings_menu = tk.Menu(menubar, tearoff=0)
+        settings_menu.add_command(label="Preferences...", command=self.open_settings_dialog)
+        settings_menu.add_command(label="Advanced Settings...", command=self.open_settings_dialog)
+        settings_menu.add_separator()
+        settings_menu.add_command(label="Restore Defaults", command=self.restore_defaults)
+        menubar.add_cascade(label="Settings", menu=settings_menu)
+        try:
+            self.logger.debug("Added top-level Settings menu")
+        except Exception:
+            pass
 
         # View menu
         view_menu = tk.Menu(menubar, tearoff=0)
@@ -6220,6 +6232,7 @@ class DownloaderGUI:
         help_menu.add_command(label="Report Issue / Send Feedback", command=self.report_issue)
         menubar.add_cascade(label="Help", menu=help_menu)
         self.root.config(menu=menubar)
+        return menubar
 
     def show_help_dialog(self):
         help_text = (
