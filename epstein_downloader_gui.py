@@ -78,15 +78,38 @@ else:
 try:
     import requests
 except ImportError:
-    # Helpful message when running script outside the project's virtual environment
-    sys.stderr.write(
-        "Missing dependency: requests.\n"
-        "Please run the repo setup script to create and populate a virtualenv:\n"
-        "  PowerShell: .\\scripts\\setup_env.ps1\n"
-        "  or: python -m pip install -r requirements.txt\n"
-    )
-    raise
-import requests
+    # If user opted out of auto setup, show message
+    if os.environ.get("EPSTEIN_NO_AUTO_INSTALL", "0") == "1":
+        sys.stderr.write(
+            "Missing dependency: requests.\nPlease run the repo setup script to create and populate a virtualenv:\n  PowerShell: .\\scripts\\setup_env.ps1\n  or: python -m pip install -r requirements.txt\n"
+        )
+        raise
+    # Try to create a local .venv automatically (best-effort)
+    venv_dir = os.path.join(repo_root, ".venv")
+    try:
+        import subprocess
+        sys.stdout.write("Creating repository virtualenv (this may take a minute)...\n")
+        subprocess.check_call([sys.executable, "-m", "venv", venv_dir])
+        # Determine new venv python path
+        new_venv_python = os.path.join(venv_dir, "Scripts", "python.exe") if os.name == "nt" else os.path.join(venv_dir, "bin", "python")
+        if not os.path.exists(new_venv_python):
+            raise RuntimeError(f"Failed to find python in created venv at {new_venv_python}")
+        sys.stdout.write("Upgrading pip and installing requirements into the new venv...\n")
+        subprocess.check_call([new_venv_python, "-m", "pip", "install", "--upgrade", "pip"])
+        reqs = os.path.join(repo_root, "requirements.txt")
+        if os.path.exists(reqs):
+            subprocess.check_call([new_venv_python, "-m", "pip", "install", "-r", reqs])
+        else:
+            subprocess.check_call([new_venv_python, "-m", "pip", "install", "requests"])
+        # Re-exec into the newly-created venv
+        sys.stdout.write("Re-executing with the newly-created venv...\n")
+        os.environ["EPSTEIN_REEXEC"] = "1"
+        os.execv(new_venv_python, [new_venv_python] + sys.argv)
+    except Exception as e:
+        sys.stderr.write(
+            f"Failed to auto-create venv and install requirements: {e}\nPlease run:\n  PowerShell: .\\scripts\\setup_env.ps1\n  or: python -m pip install -r requirements.txt\n"
+        )
+        raise
 import time
 import importlib.util
 import subprocess
@@ -200,10 +223,6 @@ def install_dependencies_with_progress(root=None):
             if root is not None and getattr(root, "after", None):
                 try:
                     root.after(100, _poll)
-            # Still running; poll again shortly
-            if root is not None and getattr(root, "after", None):
-                try:
-                    root.after(200, _poll)
                 except Exception:
                     pass
             return
@@ -234,10 +253,6 @@ def install_dependencies_with_progress(root=None):
     if root is not None and getattr(root, "after", None):
         try:
             root.after(50, _poll)
-    # Start polling
-    if root is not None and getattr(root, "after", None):
-        try:
-            root.after(100, _poll)
         except Exception:
             pass
     else:
@@ -414,9 +429,6 @@ class DownloaderGUI:
             self.queue_state_path = repo_queue
         else:
             self.queue_state_path = _installed_path("queue_state.json")
-        # Persisted state and config live under the installation directory by default
-        self.queue_state_path = _installed_path("queue_state.json")
-        self.config_path = _installed_path("config.json")
         self.status = tk.StringVar(value="Ready")
         self.speed_eta_var = tk.StringVar(value="Speed: --  ETA: --")
         self.error_log_path = os.path.join(self.log_dir, "error.log")
@@ -967,68 +979,6 @@ class DownloaderGUI:
         except Exception:
             pass
 
-
-    def shutdown(self, timeout=5):
-        """Signal background threads to stop and wait for known threads to exit.
-
-        This method attempts a conservative, backward-compatible shutdown:
-        - sets stop/cancel flags so running workers exit quickly
-        - resumes paused threads so they can observe stop requests
-        - stops spinner and other scheduled UI callbacks
-        - joins known long-running threads with a timeout
-        """
-        import time
-
-        # Signal stop and cancellation
-        try:
-            if getattr(self, "_stop_event", None):
-                self._stop_event.set()
-        except Exception:
-            pass
-        try:
-            self._cancel_scan = True
-        except Exception:
-            pass
-        try:
-            # Unpause anything paused so threads can proceed to cooperative exit
-            if getattr(self, "_pause_event", None):
-                self._pause_event.set()
-            self._is_paused = False
-        except Exception:
-            pass
-        # Stop spinner (cancels scheduled after jobs)
-        try:
-            self.stop_spinner()
-        except Exception:
-            pass
-        # Attempt to join tracked threads
-        joinables = []
-        try:
-            if getattr(self, "_download_all_thread", None):
-                joinables.append(self._download_all_thread)
-        except Exception:
-            pass
-        try:
-            if getattr(self, "_process_thread", None):
-                joinables.append(self._process_thread)
-        except Exception:
-            pass
-        # Join with timeout
-        start = time.time()
-        for t in joinables:
-            try:
-                remaining = max(0.0, timeout - (time.time() - start))
-                if remaining <= 0:
-                    break
-                t.join(remaining)
-            except Exception:
-                pass
-        # Give a short grace period for thread pools / workers
-        try:
-            time.sleep(0.1)
-        except Exception:
-            pass
-
     def log_error(
         self, err: Exception, context: str = ""
     ):  # Utility for error logging and dialog
@@ -1175,16 +1125,6 @@ class DownloaderGUI:
                             )
                         except Exception:
                             pass
-            items = self.root.tk.splitlist(dropped)
-            for item in items:
-                if item.lower().endswith("credentials.json"):
-                    # Copy or set config to use this credentials file
-                    self.config["credentials_path"] = item
-                    self.save_config()
-                    self.logger.info(f"Set credentials.json via drag-and-drop: {item}")
-                    messagebox.showinfo(
-                        "Credentials Set", f"credentials.json set to: {item}"
-                    )
                 else:
                     self.logger.info(
                         f"Dropped file ignored (not credentials.json): {item}"
@@ -2658,7 +2598,7 @@ class DownloaderGUI:
                         ),
                     )
                 except Exception as e:
-                except Exception:
+                    msg = f"Credentials validation failed: {e}"
                     self.root.after(
                         0,
                         lambda m=msg: messagebox.showerror(
@@ -2667,7 +2607,7 @@ class DownloaderGUI:
                         ),
                     )
             except Exception as e:
-            except Exception:
+                msg = f"Credentials validation failed: {e}"
                 self.root.after(
                     0,
                     lambda m=msg: messagebox.showerror(
@@ -5575,9 +5515,6 @@ class DownloaderGUI:
             )
         else:
             raise RuntimeError("No credentials available for Google Drive API download")
-        creds = service_account.Credentials.from_service_account_file(
-            credentials_path, scopes=SCOPES
-        )
         service = build("drive", "v3", credentials=creds)
 
         def list_files(service, folder_id):
