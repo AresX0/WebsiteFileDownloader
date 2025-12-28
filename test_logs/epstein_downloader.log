@@ -16,3 +16,15 @@
 2025-12-27 16:33:49,259 - DEBUG - Loading config from C:\Projects\Website Downloader\config.json
 2025-12-27 16:33:49,260 - DEBUG - Config loaded: ['download_dir', 'log_dir', 'credentials_path', 'concurrent_downloads', 'proxy', 'speed_limit_kbps', 'theme', 'use_gdown_fallback', 'url_list', 'auto_start', 'start_minimized']
 2025-12-27 16:33:49,260 - INFO - Queue state restored.
+2025-12-27 16:44:42,381 - INFO - Logger initialized. logfile=C:\Projects\Website Downloader\test_logs\epstein_downloader.log
+2025-12-27 16:44:42,523 - DEBUG - Loading config from C:\Projects\Website Downloader\config.json
+2025-12-27 16:44:42,524 - DEBUG - Config loaded: ['download_dir', 'log_dir', 'credentials_path', 'concurrent_downloads', 'proxy', 'speed_limit_kbps', 'theme', 'use_gdown_fallback', 'url_list', 'auto_start', 'start_minimized']
+2025-12-27 16:44:42,524 - INFO - Queue state restored.
+2025-12-27 16:53:54,735 - INFO - Logger initialized. logfile=C:\Projects\Website Downloader\test_logs\epstein_downloader.log
+2025-12-27 16:53:54,857 - DEBUG - Loading config from C:\Projects\Website Downloader\config.json
+2025-12-27 16:53:54,858 - DEBUG - Config loaded: ['download_dir', 'log_dir', 'credentials_path', 'concurrent_downloads', 'proxy', 'speed_limit_kbps', 'theme', 'use_gdown_fallback', 'url_list', 'auto_start', 'start_minimized']
+2025-12-27 16:53:54,858 - INFO - Queue state restored.
+2025-12-27 17:12:14,192 - INFO - Logger initialized. logfile=C:\Projects\Website Downloader\test_logs\epstein_downloader.log
+2025-12-27 17:12:14,323 - DEBUG - Loading config from C:\Projects\Website Downloader\config.json
+2025-12-27 17:12:14,324 - DEBUG - Config loaded: ['download_dir', 'log_dir', 'credentials_path', 'concurrent_downloads', 'proxy', 'speed_limit_kbps', 'theme', 'use_gdown_fallback', 'url_list', 'auto_start', 'start_minimized']
+2025-12-27 17:12:14,324 - INFO - Queue state restored.

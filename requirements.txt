@@ -2,3 +2,11 @@ playwright>=1.40.0
 requests>=2.32.0
 Pillow>=9.0.0
 pytest>=7.0.0
+# Google Drive API support
+google-auth>=2.41.1
+google-api-python-client>=2.0.0
+google-auth-httplib2>=0.3.0
+google-auth-oauthlib>=1.2.0
+# Optional helpers
+gdown>=4.6.0
+tkinterdnd2>=0.3.0

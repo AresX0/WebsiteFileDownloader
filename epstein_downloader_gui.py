@@ -1,4 +1,4 @@
-# EpsteinFilesDownloader v1.0.0
+﻿# EpsteinFilesDownloader v1.0.0
 # (C) 2025 - Refactored for clarity, maintainability, and efficiency
 
 __version__ = "1.0.0"
@@ -38,17 +38,78 @@ except ImportError:
 
     DND_AVAILABLE = False
 from datetime import datetime
+# If this script is invoked with a system Python that lacks dependencies, prefer to re-exec
+# into the repository-local virtualenv (if present) to provide a smooth developer UX.
+try:
+    repo_root = os.path.abspath(os.path.dirname(__file__))
+except Exception:
+    repo_root = os.getcwd()
+# Look for common venv locations (Windows & Unix)
+venv_candidates = [
+    os.path.join(repo_root, ".venv", "Scripts", "python.exe"),
+    os.path.join(repo_root, "venv", "Scripts", "python.exe"),
+    os.path.join(repo_root, ".venv", "bin", "python"),
+    os.path.join(repo_root, "venv", "bin", "python"),
+]
+venv_python = None
+for p in venv_candidates:
+    if os.path.exists(p):
+        venv_python = p
+        break
+# Avoid infinite re-exec loops
+_already_reexec = os.environ.get("EPSTEIN_REEXEC", "0") == "1"
+# By default prefer the system Python on Windows; re-exec into the repository venv
+# only when explicitly requested via EPISTEIN_PREFER_VENV=1. This avoids unexpected
+# re-exec behavior when users want to run the app using the system Python.
+if os.environ.get("EPISTEIN_PREFER_VENV", "0") == "1":
+    # If venv exists and we're not already running it, re-exec into it
+    if venv_python and os.path.abspath(sys.executable) != os.path.abspath(venv_python) and not _already_reexec:
+        try:
+            sys.stdout.write(f"Re-executing with repository venv Python: {venv_python}\n")
+            os.environ["EPSTEIN_REEXEC"] = "1"
+            os.execv(venv_python, [venv_python] + sys.argv)
+        except Exception as ex:
+            sys.stderr.write(f"Failed to re-exec using repo venv: {ex}\n")
+else:
+    # System Python will be used; no re-exec requested
+    pass
+
+# If no venv found and deps are missing, optionally create a venv and install requirements
 try:
     import requests
 except ImportError:
-    # Helpful message when running script outside the project's virtual environment
-    sys.stderr.write(
-        "Missing dependency: requests.\n"
-        "Please run the repo setup script to create and populate a virtualenv:\n"
-        "  PowerShell: .\\scripts\\setup_env.ps1\n"
-        "  or: python -m pip install -r requirements.txt\n"
-    )
-    raise
+    # If user opted out of auto setup, show message
+    if os.environ.get("EPSTEIN_NO_AUTO_INSTALL", "0") == "1":
+        sys.stderr.write(
+            "Missing dependency: requests.\nPlease run the repo setup script to create and populate a virtualenv:\n  PowerShell: .\\scripts\\setup_env.ps1\n  or: python -m pip install -r requirements.txt\n"
+        )
+        raise
+    # Try to create a local .venv automatically (best-effort)
+    venv_dir = os.path.join(repo_root, ".venv")
+    try:
+        import subprocess
+        sys.stdout.write("Creating repository virtualenv (this may take a minute)...\n")
+        subprocess.check_call([sys.executable, "-m", "venv", venv_dir])
+        # Determine new venv python path
+        new_venv_python = os.path.join(venv_dir, "Scripts", "python.exe") if os.name == "nt" else os.path.join(venv_dir, "bin", "python")
+        if not os.path.exists(new_venv_python):
+            raise RuntimeError(f"Failed to find python in created venv at {new_venv_python}")
+        sys.stdout.write("Upgrading pip and installing requirements into the new venv...\n")
+        subprocess.check_call([new_venv_python, "-m", "pip", "install", "--upgrade", "pip"])
+        reqs = os.path.join(repo_root, "requirements.txt")
+        if os.path.exists(reqs):
+            subprocess.check_call([new_venv_python, "-m", "pip", "install", "-r", reqs])
+        else:
+            subprocess.check_call([new_venv_python, "-m", "pip", "install", "requests"])
+        # Re-exec into the newly-created venv
+        sys.stdout.write("Re-executing with the newly-created venv...\n")
+        os.environ["EPSTEIN_REEXEC"] = "1"
+        os.execv(new_venv_python, [new_venv_python] + sys.argv)
+    except Exception as e:
+        sys.stderr.write(
+            f"Failed to auto-create venv and install requirements: {e}\nPlease run:\n  PowerShell: .\\scripts\\setup_env.ps1\n  or: python -m pip install -r requirements.txt\n"
+        )
+        raise
 import time
 import importlib.util
 import subprocess
@@ -1877,6 +1938,53 @@ class DownloaderGUI:
             "If enabled, will use gdown to download Google Drive folders if the API fails or credentials are missing. This may be less reliable.",
         )
 
+        # Capture the dialog's initial values so we can detect what changed
+        orig_values = {
+            "download_dir": self.base_dir.get(),
+            "log_dir": getattr(self, "log_dir", ""),
+            "credentials_path": getattr(self, "credentials_path", "") or "",
+            "concurrent_downloads": int(self.concurrent_downloads.get()),
+            "proxy": self.config.get("proxy", ""),
+            "speed_limit_kbps": int(self.config.get("speed_limit_kbps", 0)),
+            "auto_start": bool(self.config.get("auto_start", False)),
+            "start_minimized": bool(self.config.get("start_minimized", False)),
+            "use_gdown_fallback": bool(self.config.get("use_gdown_fallback", False)),
+            "theme": ("Dark" if self.dark_mode else "Light"),
+        }
+
+        def _localize(key, **kwargs):
+            # Simple localization layer: add more languages here as needed
+            strings = {
+                "confirm_title": "Save Changes",
+                "confirm_prompt": "Save changes to the following settings?\n{fields}",
+                "settings_saved": "Settings saved",
+            }
+            return strings.get(key, key).format(**kwargs)
+
+        def _gather_changes():
+            changes = []
+            if download_var.get() != orig_values["download_dir"]:
+                changes.append("Download Folder")
+            if log_var.get() != orig_values["log_dir"]:
+                changes.append("Log Folder")
+            if (cred_var.get() or "") != orig_values["credentials_path"]:
+                changes.append("Credentials File")
+            if int(concurrency_var.get()) != int(orig_values["concurrent_downloads"]):
+                changes.append("Concurrent Downloads")
+            if proxy_var.get() != orig_values["proxy"]:
+                changes.append("Proxy")
+            if int(speed_var.get()) != int(orig_values["speed_limit_kbps"]):
+                changes.append("Speed Limit")
+            if bool(self.auto_start_var.get()) != bool(orig_values["auto_start"]):
+                changes.append("Auto-start")
+            if bool(self.start_minimized_var.get()) != bool(orig_values["start_minimized"]):
+                changes.append("Start Minimized")
+            if bool(self.use_gdown_fallback.get()) != bool(orig_values["use_gdown_fallback"]):
+                changes.append("gdown Fallback")
+            if theme_var.get() != orig_values["theme"]:
+                changes.append("Theme")
+            return changes
+
         def save_and_close():
             self.base_dir.set(download_var.get())
             self.log_dir = log_var.get()
@@ -1919,7 +2027,7 @@ class DownloaderGUI:
             win.destroy()
             # Small transient confirmation (non-blocking)
             try:
-                self.show_toast("Settings saved", duration=1400)
+                self.show_toast(_localize("settings_saved"), duration=1400)
             except Exception:
                 # Fallback to modal dialog if toast fails
                 try:
@@ -1947,8 +2055,43 @@ class DownloaderGUI:
             except Exception:
                 self.logger.warning("Failed to save config after settings change.")
 
+        def confirm_close(event=None):
+            changes = _gather_changes()
+            if not changes:
+                # Nothing changed: close quietly
+                try:
+                    win.destroy()
+                except Exception:
+                    pass
+                return
+            fields = "\n".join(f"- {c}" for c in changes)
+            resp = messagebox.askyesnocancel(
+                _localize("confirm_title"),
+                _localize("confirm_prompt", fields=fields),
+            )
+            # True -> Yes (save); False -> No (discard); None -> Cancel
+            if resp is True:
+                save_and_close()
+            elif resp is False:
+                try:
+                    win.destroy()
+                except Exception:
+                    pass
+            else:
+                # Cancel: do nothing
+                return
+
         save_btn = ttk.Button(win, text="Save", command=save_and_close)
         save_btn.pack(pady=12)
+        # Wire up close/keyboard handlers: WM_DELETE_WINDOW and Escape will trigger
+        # the confirm-close flow (ask to save/discard/cancel) so users don't lose accidental changes.
+        try:
+            win.protocol("WM_DELETE_WINDOW", confirm_close)
+            win.bind("<Return>", lambda e: save_and_close())
+            win.bind("<Escape>", lambda e: confirm_close())
+        except Exception:
+            # Older Tk versions or test harnesses may not support these operations; ignore
+            pass
 
         # Tooltips
         self.add_tooltip(download_entry, "Edit the download folder path.")
@@ -2455,18 +2598,20 @@ class DownloaderGUI:
                         ),
                     )
                 except Exception as e:
+                    msg = f"Credentials validation failed: {e}"
                     self.root.after(
                         0,
-                        lambda: messagebox.showerror(
+                        lambda m=msg: messagebox.showerror(
                             "Validate Credentials",
-                            f"Credentials validation failed: {e}",
+                            m,
                         ),
                     )
             except Exception as e:
+                msg = f"Credentials validation failed: {e}"
                 self.root.after(
                     0,
-                    lambda: messagebox.showerror(
-                        "Validate Credentials", f"Credentials validation failed: {e}"
+                    lambda m=msg: messagebox.showerror(
+                        "Validate Credentials", m
                     ),
                 )
 
@@ -2511,11 +2656,12 @@ class DownloaderGUI:
                             f"URL returned status code {r.status_code}: {url}",
                         ),
                     )
-            except Exception:
+            except Exception as e:
+                msg = f"Failed to reach URL: {e}"
                 self.root.after(
                     0,
-                    lambda: messagebox.showerror(
-                        "Test Download Link", f"Failed to reach URL: {e}"
+                    lambda m=msg: messagebox.showerror(
+                        "Test Download Link", m
                     ),
                 )
 
@@ -3105,24 +3251,35 @@ class DownloaderGUI:
         # Schedule status update on the main thread, safe for closed mainloop
         try:
             self.root.after(0, self.status.set, msg)
-            self.append_status_pane(msg)
-        except RuntimeError:
+            try:
+                self.append_status_pane(msg)
+            except Exception:
+                # Be defensive: GUI may be closing, ignore any errors appending status
+                pass
+        except Exception:
+            # Could be RuntimeError or TclError if the application is shutting down
             pass
 
     def append_status_pane(self, msg):
         def append():
             try:
                 if hasattr(self, "status_pane") and self.status_pane:
-                    self.status_pane.configure(state="normal")
-                    self.status_pane.insert("end", msg + "\n")
-                    self.status_pane.see("end")
-                    self.status_pane.configure(state="disabled")
-            except RuntimeError:
+                    try:
+                        self.status_pane.configure(state="normal")
+                        self.status_pane.insert("end", msg + "\n")
+                        self.status_pane.see("end")
+                        self.status_pane.configure(state="disabled")
+                    except Exception:
+                        # Widget might have been destroyed or Tcl error occurred; ignore
+                        pass
+            except Exception:
+                # Shouldn't propagate exceptions from append
                 pass
 
         try:
             self.root.after(0, append)
-        except RuntimeError:
+        except Exception:
+            # Ignore errors scheduling the callback (app shutting down)
             pass
 
     def create_widgets(self):
@@ -4892,12 +5049,8 @@ class DownloaderGUI:
                     self.build_existing_hash_file(base_dir_cmp, self.hash_file_path)
                 except Exception as e:
                     self.logger.error(f"Failed to build hash file: {e}")
-                    self.root.after(
-                        0,
-                        lambda: messagebox.showerror(
-                            "Error", f"Failed to scan existing files: {e}"
-                        ),
-                    )
+                    msg = f"Failed to scan existing files: {e}"
+                    self.root.after(0, lambda m=msg: messagebox.showerror("Error", m))
                     return
             self.skipped_files = set()
             self.file_tree = {}
