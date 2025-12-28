@@ -1,4 +1,4 @@
-﻿# EpsteinFilesDownloader v1.0.0
+# EpsteinFilesDownloader v1.0.0
 # (C) 2025 - Refactored for clarity, maintainability, and efficiency
 
 __version__ = "1.0.0"
