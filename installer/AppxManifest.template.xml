@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10">
+  <Identity Name="PlatypusFiles.EpsteinDownloader" Publisher="CN=%PUBLISHER_CN%" Version="%VERSION%" />
+  <Properties>
+    <DisplayName>EpsteinFilesDownloader</DisplayName>
+    <PublisherDisplayName>PlatypusFiles</PublisherDisplayName>
+    <Logo>assets\logo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
+  </Dependencies>
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+  <Applications>
+    <Application Id="EpsteinApp" Executable="EpsteinDownloader.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="EpsteinFilesDownloader" Square150x150Logo="assets\logo.png" Description="Downloader for public court records">
+      </uap:VisualElements>
+      <Extensions>
+        <desktop:Extension Category="windows.fullTrustApp" Executable="EpsteinDownloader.exe" EntryPoint="Windows.FullTrustApplication" />
+      </Extensions>
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

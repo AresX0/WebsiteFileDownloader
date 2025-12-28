@@ -29,6 +29,87 @@ import requests
 import time
 import importlib.util
 import subprocess
+import tempfile
+import ctypes
+
+# Prefer a Windows named mutex for single-instance behavior (robust across processes,
+# UAC contexts, and temp dir differences). Fall back to a file-based lock on non-Windows.
+_MUTEX_NAME = "Global\\EpsteinFilesDownloaderSingleInstanceMutex"
+_MUTEX_HANDLE = None
+
+
+def acquire_single_instance_lock(lockfile=None):
+    """Acquire a single-instance lock.
+
+    On Windows this uses a named global mutex. On other platforms it falls back to a simple
+    exclusive lock file in the temp directory.
+    Returns an opaque token that should be passed to release_single_instance_lock().
+    Raises RuntimeError if the lock cannot be acquired.
+    """
+    global _MUTEX_HANDLE
+    if os.name == "nt":
+        # Create a named mutex in the Global namespace so it is visible system-wide.
+        CreateMutexW = ctypes.windll.kernel32.CreateMutexW
+        GetLastError = ctypes.windll.kernel32.GetLastError
+        INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+        # Call CreateMutexW(NULL, FALSE, name)
+        name = _MUTEX_NAME
+        handle = CreateMutexW(None, False, name)
+        if not handle:
+            raise RuntimeError("Failed to create mutex for single-instance check")
+        # ERROR_ALREADY_EXISTS == 183
+        err = GetLastError()
+        if err == 183:
+            # Another instance exists
+            # Close our handle and raise
+            try:
+                ctypes.windll.kernel32.CloseHandle(handle)
+            except Exception:
+                pass
+            raise RuntimeError("Another instance of EpsteinFilesDownloader appears to be running.")
+        _MUTEX_HANDLE = handle
+        return ("mutex", handle)
+    else:
+        # File-based fallback (best-effort)
+        if lockfile is None:
+            lockfile = os.environ.get("EPISTEIN_LOCKFILE") or os.path.join(
+                tempfile.gettempdir(), "epstein_downloader.lock"
+            )
+        try:
+            fd = os.open(lockfile, os.O_CREAT | os.O_EXCL | os.O_RDWR)
+            try:
+                os.write(fd, str(os.getpid()).encode())
+            except Exception:
+                pass
+            return ("file", fd, lockfile)
+        except FileExistsError:
+            raise RuntimeError("Another instance of EpsteinFilesDownloader appears to be running.")
+
+
+def release_single_instance_lock(token):
+    """Release the single-instance lock created by acquire_single_instance_lock()."""
+    try:
+        if not token:
+            return
+        if token[0] == "mutex":
+            try:
+                ctypes.windll.kernel32.CloseHandle(token[1])
+            except Exception:
+                pass
+        elif token[0] == "file":
+            try:
+                _, fd, path = token
+                if fd:
+                    os.close(fd)
+            except Exception:
+                pass
+            try:
+                if path and os.path.exists(path):
+                    os.remove(path)
+            except Exception:
+                pass
+    except Exception:
+        pass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import logging
@@ -278,9 +359,19 @@ def check_and_install(package, pip_name=None, timeout=None):
     """Install a pip package if it's not importable. Respects EPISTEIN_SKIP_INSTALL env var in high-level helper."""
     pip_name = pip_name or package
     if importlib.util.find_spec(package) is None:
-        _run_command(
-            [sys.executable, "-m", "pip", "install", pip_name], timeout=timeout
-        )
+        # If running as a frozen executable, avoid using sys.executable (which points
+        # back to this EXE) to invoke pip; prefer an external 'python' if available.
+        interpreter = sys.executable
+        if getattr(sys, "frozen", False):
+            interpreter = os.environ.get("PYTHON_INTERPRETER") or "python"
+        try:
+            _run_command([interpreter, "-m", "pip", "install", pip_name], timeout=timeout)
+        except Exception as e:
+            logging.getLogger("EpsteinFilesDownloader").warning(
+                "Failed to auto-install package %s using '%s': %s", pip_name, interpreter, e
+            )
+            # Re-raise so higher-level installers can decide what to do
+            raise
 
 
 def ensure_playwright_browsers():
@@ -309,6 +400,15 @@ def ensure_playwright_browsers():
                 # Try a quick launch to verify presence. If it fails, attempt installation.
                 p.chromium.launch(headless=True).close()
             except Exception:
+                # If running as a frozen executable (PyInstaller one-file/onedir), avoid
+                # launching the system Python via `sys.executable -m playwright` because
+                # `sys.executable` in that case points back at this same EXE and would
+                # cause a self-restart recursion (spawning more copies of this app).
+                if getattr(sys, "frozen", False):
+                    logging.getLogger("EpsteinFilesDownloader").warning(
+                        "Playwright browser launch failed and app is packaged; please install Playwright browsers during build or run 'python -m playwright install' in an external Python environment."
+                    )
+                    return
                 # Run playwright installer with a timeout so we don't hang forever
                 _run_command(
                     [sys.executable, "-m", "playwright", "install", "chromium"],
@@ -409,6 +509,10 @@ class DownloaderGUI:
         self._is_stopped = False
         # Image cache to keep PhotoImage refs
         self._images = {}
+        # Toast and transient popup guard to prevent UI spam on startup or repeating errors
+        self._toast_window = None
+        self._toast_after_id = None
+        self._last_toast_time = 0.0
         self.downloaded_json = tk.StringVar(value="")
         self.logger = logging.getLogger("EpsteinFilesDownloader")
         # Ensure asset placeholders exist (create any missing or corrupt images)
@@ -1530,8 +1634,42 @@ class DownloaderGUI:
             pass
 
     def show_toast(self, message, duration=1500):
-        """Show a transient non-blocking 'toast' message near the bottom-right of the main window."""
+        """Show a transient non-blocking 'toast' message near the bottom-right of the main window.
+
+        This implementation throttles creation so that repeated calls do not spawn many
+        Toplevel windows in rapid succession (which can appear as 'keystroke storms').
+        If a toast is already visible, update its text and extend its lifetime instead.
+        """
         try:
+            now = time.time()
+            # If existing toast window present, update text and extend lifetime
+            if getattr(self, "_toast_window", None) and getattr(self, "_toast_window", None).winfo_exists():
+                try:
+                    for child in self._toast_window.winfo_children():
+                        if isinstance(child, tk.Label):
+                            child.config(text=message)
+                    # Cancel previous scheduled destroy and reschedule
+                    try:
+                        if getattr(self, "_toast_after_id", None) is not None:
+                            try:
+                                self._toast_window.after_cancel(self._toast_after_id)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    self._toast_after_id = self._toast_window.after(
+                        duration, lambda: (self._toast_window.destroy() if self._toast_window and self._toast_window.winfo_exists() else None)
+                    )
+                except Exception:
+                    pass
+                self._last_toast_time = now
+                return
+
+            # Throttle toast creation to at most one every 250ms
+            if now - getattr(self, "_last_toast_time", 0.0) < 0.25:
+                return
+            self._last_toast_time = now
+
             toast = tk.Toplevel(self.root)
             toast.overrideredirect(True)
             toast.attributes("-topmost", True)
@@ -1549,7 +1687,17 @@ class DownloaderGUI:
                 12, self.root.winfo_height() - toast.winfo_reqheight() - 40
             )
             toast.geometry(f"+{x}+{y}")
-            toast.after(
+            # Store refs so repeated calls update the same toast
+            self._toast_window = toast
+            try:
+                if getattr(self, "_toast_after_id", None) is not None:
+                    try:
+                        toast.after_cancel(self._toast_after_id)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            self._toast_after_id = toast.after(
                 duration, lambda: (toast.destroy() if toast.winfo_exists() else None)
             )
         except Exception as e:
@@ -5423,6 +5571,35 @@ class DownloaderGUI:
 
 
 def main():
+    # Ensure single instance: create an exclusive lock in the temp dir. If lock exists, exit cleanly.
+    lock = None
+    try:
+        lock = acquire_single_instance_lock()
+    except RuntimeError as re:
+        # Friendly behavior: log and inform user, then exit
+        try:
+            logging.getLogger("EpsteinFilesDownloader").warning("%s", re)
+        except Exception:
+            pass
+        try:
+            # Use a non-blocking message to avoid focus-stealing loops
+            import tkinter as _tk
+            from tkinter import messagebox as _mb
+
+            try:
+                _root = _tk.Tk()
+                _root.withdraw()
+                _mb.showinfo(
+                    "Already Running",
+                    "Epstein Files Downloader is already running. Only one instance is allowed.",
+                )
+                _root.destroy()
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return
+
     # If installed in Program Files, prefer running from the install directory so assets and bundled files are resolved predictably
     try:
         if os.path.isdir(INSTALL_DIR):
