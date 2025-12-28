@@ -310,12 +310,22 @@ def ensure_pip():
         ensurepip.bootstrap()
 
 
+def _write_startup_debug(msg):
+    try:
+        p = os.path.join(tempfile.gettempdir(), "epstein_startup.log")
+        with open(p, "a", encoding="utf-8") as fh:
+            fh.write(f"[{datetime.utcnow().isoformat()}] PID={os.getpid()} PPID={os.getppid()} {msg}\n")
+    except Exception:
+        pass
+
+
 def _run_command(cmd, timeout=None):
     """Run external command with timeout and return stdout. Tracks Popen so callers may cancel.
 
     Uses subprocess.Popen + communicate to allow termination on timeout/cancel and to keep a reference
     for kill_in_progress_subprocesses(). Raises RuntimeError on failure or timeout.
     """
+    _write_startup_debug(f"RUN_CMD START: {cmd}")
     timeout = timeout or INSTALL_TIMEOUT
     proc = None
     try:
@@ -324,11 +334,14 @@ def _run_command(cmd, timeout=None):
         )
         try:
             CURRENT_SUBPROCESSES.append(proc)
+            _write_startup_debug(f"RUN_CMD PID: {proc.pid}")
             out, err = proc.communicate(timeout=timeout)
             if proc.returncode != 0:
+                _write_startup_debug(f"RUN_CMD FAILED: exit={proc.returncode} out={out!r} err={err!r}")
                 raise RuntimeError(
                     f"Command failed (exit {proc.returncode}): {' '.join(cmd)}\nstdout:\n{out}\nstderr:\n{err}"
                 )
+            _write_startup_debug(f"RUN_CMD OK: exit={proc.returncode}")
             return out
         finally:
             try:
