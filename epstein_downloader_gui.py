@@ -5,19 +5,6 @@ __version__ = "1.0.0"
 
 
 import io
-import os as _os_for_install_check
-
-# Default installation directory; overridable via EPISTEIN_INSTALL_DIR env var
-INSTALL_DIR = _os_for_install_check.environ.get(
-    "EPISTEIN_INSTALL_DIR",
-    r"C:\Program Files\PlatypusFiles\WebsiteFileDownloader",
-)
-
-
-# Helper: prefer files under INSTALL_DIR first, then fallback to package dir
-def _installed_path(*parts):
-    return os.path.join(INSTALL_DIR, *parts)
-
 
 import os
 import re
@@ -38,84 +25,40 @@ except ImportError:
 
     DND_AVAILABLE = False
 from datetime import datetime
-# If this script is invoked with a system Python that lacks dependencies, prefer to re-exec
-# into the repository-local virtualenv (if present) to provide a smooth developer UX.
-try:
-    repo_root = os.path.abspath(os.path.dirname(__file__))
-except Exception:
-    repo_root = os.getcwd()
-# Look for common venv locations (Windows & Unix)
-venv_candidates = [
-    os.path.join(repo_root, ".venv", "Scripts", "python.exe"),
-    os.path.join(repo_root, "venv", "Scripts", "python.exe"),
-    os.path.join(repo_root, ".venv", "bin", "python"),
-    os.path.join(repo_root, "venv", "bin", "python"),
-]
-venv_python = None
-for p in venv_candidates:
-    if os.path.exists(p):
-        venv_python = p
-        break
-# Avoid infinite re-exec loops
-_already_reexec = os.environ.get("EPSTEIN_REEXEC", "0") == "1"
-# By default prefer the system Python on Windows; re-exec into the repository venv
-# only when explicitly requested via EPISTEIN_PREFER_VENV=1. This avoids unexpected
-# re-exec behavior when users want to run the app using the system Python.
-if os.environ.get("EPISTEIN_PREFER_VENV", "0") == "1":
-    # If venv exists and we're not already running it, re-exec into it
-    if venv_python and os.path.abspath(sys.executable) != os.path.abspath(venv_python) and not _already_reexec:
-        try:
-            sys.stdout.write(f"Re-executing with repository venv Python: {venv_python}\n")
-            os.environ["EPSTEIN_REEXEC"] = "1"
-            os.execv(venv_python, [venv_python] + sys.argv)
-        except Exception as ex:
-            sys.stderr.write(f"Failed to re-exec using repo venv: {ex}\n")
-else:
-    # System Python will be used; no re-exec requested
-    pass
-
-# If no venv found and deps are missing, optionally create a venv and install requirements
-try:
-    import requests
-except ImportError:
-    # If user opted out of auto setup, show message
-    if os.environ.get("EPSTEIN_NO_AUTO_INSTALL", "0") == "1":
-        sys.stderr.write(
-            "Missing dependency: requests.\nPlease run the repo setup script to create and populate a virtualenv:\n  PowerShell: .\\scripts\\setup_env.ps1\n  or: python -m pip install -r requirements.txt\n"
-        )
-        raise
-    # Try to create a local .venv automatically (best-effort)
-    venv_dir = os.path.join(repo_root, ".venv")
-    try:
-        import subprocess
-        sys.stdout.write("Creating repository virtualenv (this may take a minute)...\n")
-        subprocess.check_call([sys.executable, "-m", "venv", venv_dir])
-        # Determine new venv python path
-        new_venv_python = os.path.join(venv_dir, "Scripts", "python.exe") if os.name == "nt" else os.path.join(venv_dir, "bin", "python")
-        if not os.path.exists(new_venv_python):
-            raise RuntimeError(f"Failed to find python in created venv at {new_venv_python}")
-        sys.stdout.write("Upgrading pip and installing requirements into the new venv...\n")
-        subprocess.check_call([new_venv_python, "-m", "pip", "install", "--upgrade", "pip"])
-        reqs = os.path.join(repo_root, "requirements.txt")
-        if os.path.exists(reqs):
-            subprocess.check_call([new_venv_python, "-m", "pip", "install", "-r", reqs])
-        else:
-            subprocess.check_call([new_venv_python, "-m", "pip", "install", "requests"])
-        # Re-exec into the newly-created venv
-        sys.stdout.write("Re-executing with the newly-created venv...\n")
-        os.environ["EPSTEIN_REEXEC"] = "1"
-        os.execv(new_venv_python, [new_venv_python] + sys.argv)
-    except Exception as e:
-        sys.stderr.write(
-            f"Failed to auto-create venv and install requirements: {e}\nPlease run:\n  PowerShell: .\\scripts\\setup_env.ps1\n  or: python -m pip install -r requirements.txt\n"
-        )
-        raise
+import requests
 import time
 import importlib.util
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import logging
+
+# Default installation directory; overridable via EPISTEIN_INSTALL_DIR env var
+INSTALL_DIR = os.environ.get(
+    "EPISTEIN_INSTALL_DIR",
+    r"C:\Program Files\PlatypusFiles\WebsiteFileDownloader",
+)
+
+# Helper: prefer EPISTEIN_INSTALL_DIR (if set), otherwise prefer repo files during development, then the installed path
+def _installed_path(*parts):
+    # If the environment explicitly sets the install dir, honor it (tests & portable installs)
+    env_install = os.environ.get("EPISTEIN_INSTALL_DIR")
+    if env_install:
+        return os.path.join(env_install, *parts)
+    # Prefer repo-local files during development when they exist
+    repo_root = os.path.abspath(os.path.dirname(__file__))
+    repo_candidate = os.path.join(repo_root, *parts)
+    if os.path.exists(repo_candidate):
+        return repo_candidate
+    # Fallback to the configured INSTALL_DIR
+    return os.path.join(INSTALL_DIR, *parts)
+
+# Global repo/project paths (prefer these when present or writable during development/tests)
+REPO_ROOT = os.path.abspath(os.path.dirname(__file__))
+REPO_CONFIG = os.path.join(REPO_ROOT, "config.json")
+REPO_QUEUE = os.path.join(REPO_ROOT, "queue_state.json")
+DEFAULT_CONFIG_PATH = REPO_CONFIG if (os.path.exists(REPO_CONFIG) or os.access(REPO_ROOT, os.W_OK)) else _installed_path("config.json")
+DEFAULT_QUEUE_PATH = REPO_QUEUE if (os.path.exists(REPO_QUEUE) or os.access(REPO_ROOT, os.W_OK)) else _installed_path("queue_state.json")
 
 
 # --- Dependency Checks and Playwright Setup ---
@@ -199,6 +142,17 @@ def install_dependencies_with_progress(root=None):
     global LAST_INSTALLER_THREAD, LAST_INSTALLER_CANCEL_EVENT
     LAST_INSTALLER_THREAD = installer_thread
     LAST_INSTALLER_CANCEL_EVENT = cancel_event
+
+    # Start a background watcher to react to cancel events immediately (helps tests and improves responsiveness)
+    def _cancel_watcher():
+        cancel_event.wait()
+        try:
+            kill_in_progress_subprocesses()
+        except Exception:
+            pass
+
+    threading.Thread(target=_cancel_watcher, daemon=True).start()
+
     installer_thread.start()
 
     # Poll for completion without blocking the UI
@@ -219,7 +173,7 @@ def install_dependencies_with_progress(root=None):
                 pass
             return
         if installer_thread.is_alive():
-            # Still running; poll again shortly (keep interval short for responsive cancel)
+            # Still running; poll again shortly
             if root is not None and getattr(root, "after", None):
                 try:
                     root.after(200, _poll)
@@ -249,7 +203,7 @@ def install_dependencies_with_progress(root=None):
             except Exception:
                 close_progress()
 
-    # Start polling (short initial delay so cancel actions are responsive)
+    # Start polling
     if root is not None and getattr(root, "after", None):
         try:
             root.after(100, _poll)
@@ -330,7 +284,23 @@ def check_and_install(package, pip_name=None, timeout=None):
 
 
 def ensure_playwright_browsers():
-    """Ensure Playwright browser binaries are installed. May raise on failure."""
+    """Ensure Playwright browser binaries are installed. May raise on failure.
+
+    This function will honor a bundled copy of the Playwright browser binaries when
+    present under the installed application path (we copy them during the build when
+    `-IncludePlaywrightBrowsers` is used). If a bundled copy exists, set
+    PLAYWRIGHT_BROWSERS_PATH so Playwright uses the local browsers rather than
+    attempting to download them at runtime.
+    """
+    # If a bundled playwright_browsers folder exists in the installed location, prefer it
+    try:
+        bundled = _installed_path("playwright_browsers")
+        if os.path.isdir(bundled):
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = bundled
+    except Exception:
+        # Non-fatal; fall back to the normal behavior
+        pass
+
     try:
         from playwright.sync_api import sync_playwright
 
@@ -417,18 +387,13 @@ class DownloaderGUI:
             "https://www.justice.gov/epstein/doj-disclosures",
             "https://drive.google.com/drive/folders/1TrGxDGQLDLZu1vvvZDBAh-e7wN3y6Hoz?usp=sharing",
         ]
-        # Persisted state and config prefer repo-local files during development/tests
-        repo_root = os.path.abspath(os.path.dirname(__file__))
-        repo_config = os.path.join(repo_root, "config.json")
-        repo_queue = os.path.join(repo_root, "queue_state.json")
-        if os.path.exists(repo_config) or os.access(repo_root, os.W_OK):
-            self.config_path = repo_config
-        else:
-            self.config_path = _installed_path("config.json")
-        if os.path.exists(repo_queue) or os.access(repo_root, os.W_OK):
-            self.queue_state_path = repo_queue
-        else:
-            self.queue_state_path = _installed_path("queue_state.json")
+        # For development and tests, prefer the repository config and queue files (deterministic behavior)
+        self.config_path = REPO_CONFIG
+        self.queue_state_path = REPO_QUEUE
+        try:
+            print(f"[DEBUG] resolved_paths: config_path={self.config_path} queue_path={self.queue_state_path} repo_config={REPO_CONFIG}")
+        except Exception:
+            pass
         self.status = tk.StringVar(value="Ready")
         self.speed_eta_var = tk.StringVar(value="Speed: --  ETA: --")
         self.error_log_path = os.path.join(self.log_dir, "error.log")
@@ -627,12 +592,13 @@ class DownloaderGUI:
                             f"Could not check for updates (HTTP {r.status_code}).\nURL: {url}\n{snippet}",
                         ),
                     )
-            except Exception:
+            except Exception as e:
                 # Surface exception details to help debugging network/SSL issues
+                err_text = str(e)
                 self.root.after(
                     0,
                     lambda: messagebox.showwarning(
-                        "Update Check Error", f"Error checking for updates: {e}"
+                        "Update Check Error", f"Error checking for updates: {err_text}"
                     ),
                 )
 
@@ -677,7 +643,7 @@ class DownloaderGUI:
                 if hasattr(self, "enable_scan_btn")
                 else "Enable Scans",
             ]
-            max_len = max(len(l) for l in labels)
+            max_len = max(len(lbl) for lbl in labels)
             # Add padding so icons and text fit comfortably
             width = max(20, max_len + 6)
             for btn in (
@@ -867,6 +833,8 @@ class DownloaderGUI:
                         f"Failed to save queue state after fallbacks: {pe}",
                         exc_info=True,
                     )
+            except Exception as e:
+                self.logger.error(f"Failed to save queue state: {e}")
         except Exception as e:
             self.logger.error(f"Failed to save queue state: {e}")
 
@@ -1072,59 +1040,16 @@ class DownloaderGUI:
         # Accept dropped credentials.json file
         dropped = event.data
         if dropped:
-            # Attempt to parse tcl list-style dropped data; be robust to platform differences
-            try:
-                items = tuple(self.root.tk.splitlist(dropped))
-            except Exception:
-                items = (dropped,)
-            processed = []
-            # If splitlist produced fragments (common on Windows), fall back to the raw dropped string
-            for it in items:
-                cand = it.strip('{}"')
-                processed.append(cand)
-            use_raw = False
-            if len(processed) > 1 and not any(os.path.isabs(p) or ":" in p for p in processed):
-                use_raw = True
-            if use_raw:
-                processed = [dropped.strip('{}"')]
-
-            for item in processed:
+            items = self.root.tk.splitlist(dropped)
+            for item in items:
                 if item.lower().endswith("credentials.json"):
-                    # If parsed token is not an absolute path and doesn't appear valid, try the raw dropped string
-                    if not (os.path.isabs(item) or ":" in item or os.path.exists(item)):
-                        raw = dropped.strip('{}"')
-                        if raw.lower().endswith("credentials.json"):
-                            item = raw
-                        else:
-                            self.logger.info(
-                                f"Dropped fragment ignored (not a valid path): {item}"
-                            )
-                            continue
-                    # Set credentials path, try to load immediately, and persist
-                    try:
-                        self.credentials_path = item
-                        self.config["credentials_path"] = item
-                        try:
-                            self.reload_credentials(item)
-                        except Exception as e:
-                            self.logger.warning(f"Failed to load credentials on drop: {e}")
-                        self.save_config()
-                        self.logger.info(f"Set credentials.json via drag-and-drop: {item}")
-                        try:
-                            messagebox.showinfo(
-                                "Credentials Set", f"credentials.json set to: {item}"
-                            )
-                        except Exception:
-                            pass
-                    except Exception as e:
-                        self.logger.exception(f"Error handling dropped credentials: {e}")
-                        try:
-                            messagebox.showerror(
-                                "Credentials Error",
-                                f"Failed to set credentials from dropped file: {e}",
-                            )
-                        except Exception:
-                            pass
+                    # Copy or set config to use this credentials file
+                    self.config["credentials_path"] = item
+                    self.save_config()
+                    self.logger.info(f"Set credentials.json via drag-and-drop: {item}")
+                    messagebox.showinfo(
+                        "Credentials Set", f"credentials.json set to: {item}"
+                    )
                 else:
                     self.logger.info(
                         f"Dropped file ignored (not credentials.json): {item}"
@@ -1132,72 +1057,66 @@ class DownloaderGUI:
 
     def load_config(self):
         try:
-            # Prefer a config.json in the current working directory when present (helps tests and local overrides)
-            cwd_config = os.path.join(os.getcwd(), "config.json")
-            if os.path.exists(cwd_config):
-                self.config_path = cwd_config
-            self.logger.debug(f"Loading config from {self.config_path}")
             with open(self.config_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            self.logger.debug(f"Config loaded: {list(data.keys())}")
-            return data
-        except Exception as e:
-            self.logger.debug(f"Failed to load config from {self.config_path}: {e}")
+                return json.load(f)
+        except Exception:
             return {}
 
     def save_config(self):
         """Persist current configuration to disk."""
         # Always write explicit keys so they persist (even empty strings allow UI to show state)
+        self.config["download_dir"] = self.base_dir.get()
+        self.config["log_dir"] = getattr(
+            self, "log_dir", os.path.join(os.path.dirname(__file__), "logs")
+        )
+        self.config["concurrent_downloads"] = int(self.concurrent_downloads.get())
+        # credentials_path: store empty string if not provided to make persistence predictable
+        self.config["credentials_path"] = (
+            self.credentials_path if getattr(self, "credentials_path", None) else ""
+        )
+        # Advanced flags
+        self.config["auto_start"] = bool(
+            getattr(self, "auto_start_var", tk.BooleanVar(value=False)).get()
+        )
+        self.config["start_minimized"] = bool(
+            getattr(self, "start_minimized_var", tk.BooleanVar(value=False)).get()
+        )
+        # gdown fallback flag
+        if hasattr(self, "use_gdown_fallback"):
+            self.config["use_gdown_fallback"] = bool(self.use_gdown_fallback.get())
+
+        # Attempt to write primary config path
         try:
-            self.config["download_dir"] = self.base_dir.get()
-            self.config["log_dir"] = getattr(
-                self, "log_dir", os.path.join(os.path.dirname(__file__), "logs")
-            )
-            self.config["concurrent_downloads"] = int(self.concurrent_downloads.get())
-            # credentials_path: store empty string if not provided to make persistence predictable
-            self.config["credentials_path"] = (
-                self.credentials_path if getattr(self, "credentials_path", None) else ""
-            )
-            # Advanced flags
-            self.config["auto_start"] = bool(
-                getattr(self, "auto_start_var", tk.BooleanVar(value=False)).get()
-            )
-            self.config["start_minimized"] = bool(
-                getattr(self, "start_minimized_var", tk.BooleanVar(value=False)).get()
-            )
-            # gdown fallback flag
-            if hasattr(self, "use_gdown_fallback"):
-                self.config["use_gdown_fallback"] = bool(self.use_gdown_fallback.get())
-            try:
-                with open(self.config_path, "w", encoding="utf-8") as f:
-                    json.dump(self.config, f, indent=2)
-                self.logger.info(f"Configuration saved to {self.config_path}")
-            except PermissionError as pe:
-                # Try repo-local config path first, then per-user local app data
-                repo_root = os.path.abspath(os.path.dirname(__file__))
-                repo_config = os.path.join(repo_root, "config.json")
-                user_dir = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
-                alt_dir = os.path.join(user_dir, "EpsteinFilesDownloader")
-                os.makedirs(alt_dir, exist_ok=True)
-                alt_path = os.path.join(alt_dir, "config.json")
-                saved = False
-                for p in [repo_config, alt_path]:
-                    try:
-                        with open(p, "w", encoding="utf-8") as f:
-                            json.dump(self.config, f, indent=2)
-                        self.config_path = p
-                        self.logger.info(f"Configuration saved to fallback {p}")
-                        saved = True
-                        break
-                    except Exception:
-                        continue
-                if not saved:
-                    self.logger.error(
-                        f"Failed to save configuration after fallbacks: {pe}",
-                        exc_info=True,
-                    )
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(self.config, f, indent=2)
+            self.logger.info(f"Configuration saved to {self.config_path}")
+        except PermissionError as pe:
+            # Try repo-local config path first, then per-user local app data
+            repo_root = os.path.abspath(os.path.dirname(__file__))
+            repo_config = os.path.join(repo_root, "config.json")
+            user_dir = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+            alt_dir = os.path.join(user_dir, "EpsteinFilesDownloader")
+            os.makedirs(alt_dir, exist_ok=True)
+            alt_path = os.path.join(alt_dir, "config.json")
+            saved = False
+            for p in [repo_config, alt_path]:
+                try:
+                    with open(p, "w", encoding="utf-8") as f:
+                        json.dump(self.config, f, indent=2)
+                    self.config_path = p
+                    self.logger.info(f"Configuration saved to fallback {p}")
+                    saved = True
+                    break
+                except Exception:
+                    continue
+            if not saved:
+                self.logger.error(
+                    f"Failed to save configuration after fallbacks: {pe}",
+                    exc_info=True,
+                )
         except Exception as e:
             self.logger.error(f"Failed to save configuration: {e}", exc_info=True)
+
         # Apply new log_dir immediately so the running app uses it
         try:
             if os.path.isdir(getattr(self, "log_dir", "")):
@@ -1281,9 +1200,7 @@ class DownloaderGUI:
         # Clear cached credentials when restoring defaults
         try:
             if hasattr(self, "gdrive_credentials"):
-                delattr = getattr(self, "gdrive_credentials", None)
-                if delattr is not None:
-                    self.gdrive_credentials = None
+                self.gdrive_credentials = None
         except Exception:
             pass
         self.save_config()
@@ -1537,10 +1454,22 @@ class DownloaderGUI:
             return True
         except Exception as e:
             try:
-                self.logger.warning(f"Failed to create placeholder asset {path}: {e}")
+                # If PIL is not available or creation failed, fall back to writing a tiny transparent PNG
+                tiny_png = (
+                    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+                    b"\x00\x00\x00\nIDATx\x9cc`\x00\x00\x00\x02\x00\x01\xe2!\xbc\x33\x00\x00\x00\x00IEND\xaeB`\x82"
+                )
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "wb") as fh:
+                    fh.write(tiny_png)
+                self.logger.info(f"Wrote fallback placeholder asset: {path}")
             except Exception:
-                pass
-            return False
+                try:
+                    self.logger.warning(f"Failed to create placeholder asset {path}: {e}")
+                except Exception:
+                    pass
+                return False
+            return True
 
     def ensure_assets_present(self):
         """Create or repair any expected assets (small placeholder icons) in the script's assets/ folder."""
@@ -1555,11 +1484,7 @@ class DownloaderGUI:
             "stop",
         ]
         # Prefer assets from the installer directory if present, fallback to package assets
-        assets_dir = (
-            _installed_path("assets")
-            if os.path.isdir(_installed_path("assets"))
-            else os.path.join(os.path.dirname(__file__), "assets")
-        )
+        assets_dir = _installed_path("assets") if os.path.isdir(_installed_path("assets")) else os.path.join(os.path.dirname(__file__), "assets")
         os.makedirs(assets_dir, exist_ok=True)
         for name in expected:
             p = os.path.join(assets_dir, name + ".png")
@@ -1583,7 +1508,21 @@ class DownloaderGUI:
                     need_create = True
             if need_create:
                 # Try to create placeholder
-                self.create_placeholder_asset(p, name)
+                created = self.create_placeholder_asset(p, name)
+                if not created:
+                    # Fallback: write minimal PNG to ensure non-empty file for tests and GUI
+                    tiny_png = (
+                        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+                        b"\x00\x00\x00\nIDATx\x9cc`\x00\x00\x00\x02\x00\x01\xe2!\xbc\x33\x00\x00\x00\x00IEND\xaeB`\x82"
+                    )
+                    try:
+                        with open(p, "wb") as fh:
+                            fh.write(tiny_png)
+                    except Exception:
+                        try:
+                            self.logger.warning(f"Failed to write fallback asset {p}")
+                        except Exception:
+                            pass
         # Normalize sizes after ensuring presence
         try:
             self.ensure_asset_sizes(target_px=24)
@@ -1942,60 +1881,11 @@ class DownloaderGUI:
             "If enabled, will use gdown to download Google Drive folders if the API fails or credentials are missing. This may be less reliable.",
         )
 
-        # Capture the dialog's initial values so we can detect what changed
-        orig_values = {
-            "download_dir": self.base_dir.get(),
-            "log_dir": getattr(self, "log_dir", ""),
-            "credentials_path": getattr(self, "credentials_path", "") or "",
-            "concurrent_downloads": int(self.concurrent_downloads.get()),
-            "proxy": self.config.get("proxy", ""),
-            "speed_limit_kbps": int(self.config.get("speed_limit_kbps", 0)),
-            "auto_start": bool(self.config.get("auto_start", False)),
-            "start_minimized": bool(self.config.get("start_minimized", False)),
-            "use_gdown_fallback": bool(self.config.get("use_gdown_fallback", False)),
-            "theme": ("Dark" if self.dark_mode else "Light"),
-        }
-
-        def _localize(key, **kwargs):
-            # Simple localization layer: add more languages here as needed
-            strings = {
-                "confirm_title": "Save Changes",
-                "confirm_prompt": "Save changes to the following settings?\n{fields}",
-                "settings_saved": "Settings saved",
-            }
-            return strings.get(key, key).format(**kwargs)
-
-        def _gather_changes():
-            changes = []
-            if download_var.get() != orig_values["download_dir"]:
-                changes.append("Download Folder")
-            if log_var.get() != orig_values["log_dir"]:
-                changes.append("Log Folder")
-            if (cred_var.get() or "") != orig_values["credentials_path"]:
-                changes.append("Credentials File")
-            if int(concurrency_var.get()) != int(orig_values["concurrent_downloads"]):
-                changes.append("Concurrent Downloads")
-            if proxy_var.get() != orig_values["proxy"]:
-                changes.append("Proxy")
-            if int(speed_var.get()) != int(orig_values["speed_limit_kbps"]):
-                changes.append("Speed Limit")
-            if bool(self.auto_start_var.get()) != bool(orig_values["auto_start"]):
-                changes.append("Auto-start")
-            if bool(self.start_minimized_var.get()) != bool(orig_values["start_minimized"]):
-                changes.append("Start Minimized")
-            if bool(self.use_gdown_fallback.get()) != bool(orig_values["use_gdown_fallback"]):
-                changes.append("gdown Fallback")
-            if theme_var.get() != orig_values["theme"]:
-                changes.append("Theme")
-            return changes
-
         def save_and_close():
             self.base_dir.set(download_var.get())
             self.log_dir = log_var.get()
             os.makedirs(self.log_dir, exist_ok=True)
-            self.logger.debug(f"save_and_close: cred_entry value='{cred_var.get()}'")
             self.credentials_path = cred_var.get() if cred_var.get() else None
-            self.logger.debug(f"save_and_close: self.credentials_path set to {self.credentials_path}")
             # Try to load credentials immediately so changes apply without restart
             try:
                 self.reload_credentials(self.credentials_path)
@@ -2033,7 +1923,7 @@ class DownloaderGUI:
             win.destroy()
             # Small transient confirmation (non-blocking)
             try:
-                self.show_toast(_localize("settings_saved"), duration=1400)
+                self.show_toast("Settings saved", duration=1400)
             except Exception:
                 # Fallback to modal dialog if toast fails
                 try:
@@ -2061,43 +1951,8 @@ class DownloaderGUI:
             except Exception:
                 self.logger.warning("Failed to save config after settings change.")
 
-        def confirm_close(event=None):
-            changes = _gather_changes()
-            if not changes:
-                # Nothing changed: close quietly
-                try:
-                    win.destroy()
-                except Exception:
-                    pass
-                return
-            fields = "\n".join(f"- {c}" for c in changes)
-            resp = messagebox.askyesnocancel(
-                _localize("confirm_title"),
-                _localize("confirm_prompt", fields=fields),
-            )
-            # True -> Yes (save); False -> No (discard); None -> Cancel
-            if resp is True:
-                save_and_close()
-            elif resp is False:
-                try:
-                    win.destroy()
-                except Exception:
-                    pass
-            else:
-                # Cancel: do nothing
-                return
-
         save_btn = ttk.Button(win, text="Save", command=save_and_close)
         save_btn.pack(pady=12)
-        # Wire up close/keyboard handlers: WM_DELETE_WINDOW and Escape will trigger
-        # the confirm-close flow (ask to save/discard/cancel) so users don't lose accidental changes.
-        try:
-            win.protocol("WM_DELETE_WINDOW", confirm_close)
-            win.bind("<Return>", lambda e: save_and_close())
-            win.bind("<Escape>", lambda e: confirm_close())
-        except Exception:
-            # Older Tk versions or test harnesses may not support these operations; ignore
-            pass
 
         # Tooltips
         self.add_tooltip(download_entry, "Edit the download folder path.")
@@ -2604,20 +2459,20 @@ class DownloaderGUI:
                         ),
                     )
                 except Exception as e:
-                    msg = f"Credentials validation failed: {e}"
+                    err_text = str(e)
                     self.root.after(
                         0,
-                        lambda m=msg: messagebox.showerror(
+                        lambda: messagebox.showerror(
                             "Validate Credentials",
-                            m,
+                            f"Credentials validation failed: {err_text}",
                         ),
                     )
             except Exception as e:
-                msg = f"Credentials validation failed: {e}"
+                err_text = str(e)
                 self.root.after(
                     0,
-                    lambda m=msg: messagebox.showerror(
-                        "Validate Credentials", m
+                    lambda: messagebox.showerror(
+                        "Validate Credentials", f"Credentials validation failed: {err_text}"
                     ),
                 )
 
@@ -2663,11 +2518,11 @@ class DownloaderGUI:
                         ),
                     )
             except Exception as e:
-                msg = f"Failed to reach URL: {e}"
+                err_text = str(e)
                 self.root.after(
                     0,
-                    lambda m=msg: messagebox.showerror(
-                        "Test Download Link", m
+                    lambda: messagebox.showerror(
+                        "Test Download Link", f"Failed to reach URL: {err_text}"
                     ),
                 )
 
@@ -2914,6 +2769,7 @@ class DownloaderGUI:
                 return
             # If we reach here, either credentials are missing or API failed and fallback is requested
             try:
+
                 os.makedirs(gdrive_dir, exist_ok=True)
                 self.logger.info(
                     "Attempting gdown fallback for Google Drive folder download..."
@@ -3132,9 +2988,9 @@ class DownloaderGUI:
                         downloaded = 0
                         start_time = time.time()
                         last_update = start_time
-                        last_downloaded = 0
                         eta = "--"
                         speed = "--"
+                        speed_limit = int(self.config.get("speed_limit_kbps", 0))
                         with open(local_path, "wb") as f:
                             for chunk in r.iter_content(chunk_size=8192):
                                 while not self._pause_event.is_set():
@@ -3257,35 +3113,24 @@ class DownloaderGUI:
         # Schedule status update on the main thread, safe for closed mainloop
         try:
             self.root.after(0, self.status.set, msg)
-            try:
-                self.append_status_pane(msg)
-            except Exception:
-                # Be defensive: GUI may be closing, ignore any errors appending status
-                pass
-        except Exception:
-            # Could be RuntimeError or TclError if the application is shutting down
+            self.append_status_pane(msg)
+        except RuntimeError:
             pass
 
     def append_status_pane(self, msg):
         def append():
             try:
                 if hasattr(self, "status_pane") and self.status_pane:
-                    try:
-                        self.status_pane.configure(state="normal")
-                        self.status_pane.insert("end", msg + "\n")
-                        self.status_pane.see("end")
-                        self.status_pane.configure(state="disabled")
-                    except Exception:
-                        # Widget might have been destroyed or Tcl error occurred; ignore
-                        pass
-            except Exception:
-                # Shouldn't propagate exceptions from append
+                    self.status_pane.configure(state="normal")
+                    self.status_pane.insert("end", msg + "\n")
+                    self.status_pane.see("end")
+                    self.status_pane.configure(state="disabled")
+            except RuntimeError:
                 pass
 
         try:
             self.root.after(0, append)
-        except Exception:
-            # Ignore errors scheduling the callback (app shutting down)
+        except RuntimeError:
             pass
 
     def create_widgets(self):
@@ -4378,14 +4223,6 @@ class DownloaderGUI:
         widget.bind("<Enter>", on_enter)
         widget.bind("<Leave>", on_leave)
 
-    def toggle_dark_mode(self):
-        # Toggle dark mode and apply via set_theme to keep progressbar styles consistent
-        self.dark_mode = not getattr(self, "dark_mode", False)
-        if self.dark_mode:
-            self.set_theme("clam")
-        else:
-            self.set_theme("default")
-
     def add_url(self):
         url = self.url_entry.get().strip()
         if url and url not in self.urls:
@@ -5054,9 +4891,14 @@ class DownloaderGUI:
                 try:
                     self.build_existing_hash_file(base_dir_cmp, self.hash_file_path)
                 except Exception as e:
-                    self.logger.error(f"Failed to build hash file: {e}")
-                    msg = f"Failed to scan existing files: {e}"
-                    self.root.after(0, lambda m=msg: messagebox.showerror("Error", m))
+                    err_text = str(e)
+                    self.logger.error(f"Failed to build hash file: {err_text}")
+                    self.root.after(
+                        0,
+                        lambda: messagebox.showerror(
+                            "Error", f"Failed to scan existing files: {err_text}"
+                        ),
+                    )
                     return
             self.skipped_files = set()
             self.file_tree = {}
@@ -5250,6 +5092,7 @@ class DownloaderGUI:
         file_tree=None,
         all_files=None,
     ):
+
         allowed_domains = [
             "https://www.justice.gov/epstein",
             "https://oversight.house.gov/release/oversight-committee-releases-epstein-records-provided-by-the-department-of-justice/",
@@ -5299,7 +5142,6 @@ class DownloaderGUI:
                 print(f"Error reading link attribute: {e}")
 
         # Prepare download tasks
-        download_tasks = []
         download_info = []  # (abs_url, local_path, folder)
         for href in hrefs:
             if getattr(self, "_stop_event", None) and self._stop_event.is_set():
@@ -5581,6 +5423,14 @@ class DownloaderGUI:
 
 
 def main():
+    # If installed in Program Files, prefer running from the install directory so assets and bundled files are resolved predictably
+    try:
+        if os.path.isdir(INSTALL_DIR):
+            os.chdir(INSTALL_DIR)
+    except Exception:
+        # Ignore chdir failures and continue
+        pass
+
     if DND_AVAILABLE:
         root = TkinterDnD.Tk()
     else:
@@ -5590,11 +5440,8 @@ def main():
         root.iconbitmap("JosephThePlatypus.ico")
     except Exception as e:
         print(f"Warning: Could not set window icon: {e}")
-    # Check for headless mode (CI smoke tests) and suppression flag for the startup dialog
+    # Check for headless mode (CI smoke tests)
     headless = os.environ.get("EPSTEIN_HEADLESS", "0") == "1"
-    suppress_startup_dialog = (
-        os.environ.get("EPSTEIN_SUPPRESS_STARTUP_DIALOG", "0") == "1"
-    )
     # Optionally skip the potentially interactive dependency installer in headless mode
     skip_install = os.environ.get("EPISTEIN_SKIP_INSTALL", "0") == "1"
     try:
@@ -5606,12 +5453,16 @@ def main():
             else:
                 install_dependencies_with_progress(root)
     except Exception as dep_err:
-        try:
-            messagebox.showerror(
-                "Startup Error", f"Failed to install dependencies: {dep_err}"
-            )
-        except Exception:
-            pass
+        logging.getLogger("EpsteinFilesDownloader").error(
+            f"Dependency installation failed during startup: {dep_err}"
+        )
+        if not suppress_startup_dialog:
+            try:
+                messagebox.showerror(
+                    "Startup Error", f"Failed to install dependencies: {dep_err}"
+                )
+            except Exception:
+                pass
         root.destroy()
         return
 
@@ -5620,7 +5471,7 @@ def main():
         logging.getLogger("EpsteinFilesDownloader").info(
             "Creating DownloaderGUI instance..."
         )
-        app = DownloaderGUI(root)
+        _app = DownloaderGUI(root)
         logging.getLogger("EpsteinFilesDownloader").info(
             "DownloaderGUI instance created."
         )
@@ -5686,28 +5537,5 @@ def main():
 
 
 if __name__ == "__main__":
-    # Special command-line helpers for installer/post-install operations.
-    if "--install-prereqs" in sys.argv:
-        try:
-            logging.getLogger("EpsteinFilesDownloader").info("Installing runtime prerequisites...")
-            ensure_runtime_dependencies(root=None, skip_if_env=False)
-            logging.getLogger("EpsteinFilesDownloader").info("Runtime prerequisites installed.")
-            print("OK: runtime prerequisites installed")
-            sys.exit(0)
-        except Exception as e:
-            logging.getLogger("EpsteinFilesDownloader").exception("Failed to install prerequisites: %s", e)
-            print(f"ERROR: {e}")
-            sys.exit(2)
-    if "--install-browsers" in sys.argv:
-        try:
-            logging.getLogger("EpsteinFilesDownloader").info("Installing Playwright browsers (chromium)...")
-            ensure_playwright_browsers()
-            logging.getLogger("EpsteinFilesDownloader").info("Playwright browsers installed.")
-            print("OK: playwright browsers installed")
-            sys.exit(0)
-        except Exception as e:
-            logging.getLogger("EpsteinFilesDownloader").exception("Failed to install Playwright browsers: %s", e)
-            print(f"ERROR: {e}")
-            sys.exit(3)
     logging.getLogger("EpsteinFilesDownloader").info("Starting main()...")
     main()
