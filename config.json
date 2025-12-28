@@ -1,8 +1,8 @@
 {
   "download_dir": "C:\\Temp\\Epstein",
   "log_dir": "C:\\Projects\\Website Downloader\\logs",
-  "credentials_path": "C:/Test/credentials.json",
-  "concurrent_downloads": 3,
+  "credentials_path": "C:\\Projects\\Website Downloader\\tmp_creds2.json",
+  "concurrent_downloads": 6,
   "proxy": "",
   "speed_limit_kbps": 0,
   "theme": "light",
