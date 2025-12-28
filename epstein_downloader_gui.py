@@ -6198,13 +6198,29 @@ class DownloaderGUI:
 
         # Settings menu (top-level)
         settings_menu = tk.Menu(menubar, tearoff=0)
-        settings_menu.add_command(label="Preferences...", command=self.open_settings_dialog)
-        settings_menu.add_command(label="Advanced Settings...", command=self.open_settings_dialog)
+        settings_menu.add_command(label="Preferences...", command=lambda: self.open_settings_dialog())
+        settings_menu.add_separator()
+        # Quick-open specific tabs
+        settings_menu.add_command(label="Open General Settings...", command=lambda: self.open_settings_dialog("General"))
+        settings_menu.add_command(label="Open Network Settings...", command=lambda: self.open_settings_dialog("Network"))
+        settings_menu.add_command(label="Open Appearance Settings...", command=lambda: self.open_settings_dialog("Appearance"))
+        settings_menu.add_command(label="Open Advanced Settings...", command=lambda: self.open_settings_dialog("Advanced"))
+        settings_menu.add_separator()
+        # Quick toggles / flags
+        try:
+            settings_menu.add_checkbutton(label="Enable gdown fallback", variable=self.use_gdown_fallback, command=self.save_config)
+        except Exception:
+            # If variable isn't present for some reason, ignore
+            try:
+                settings_menu.add_command(label="Enable gdown fallback (unavailable)")
+            except Exception:
+                pass
+        settings_menu.add_command(label="Toggle Dark/Light Mode", command=self.toggle_dark_mode)
         settings_menu.add_separator()
         settings_menu.add_command(label="Restore Defaults", command=self.restore_defaults)
         menubar.add_cascade(label="Settings", menu=settings_menu)
         try:
-            self.logger.debug("Added top-level Settings menu")
+            self.logger.debug("Added top-level Settings menu (with quick items)")
         except Exception:
             pass
 
@@ -6310,8 +6326,11 @@ class DownloaderGUI:
 
 
 
-    def open_settings_dialog(self):
-        """Open a dialog to view and edit all key settings, grouped in tabs."""
+    def open_settings_dialog(self, tab=None):
+        """Open a dialog to view and edit all key settings, grouped in tabs.
+
+        Optional `tab` may be one of: 'General', 'Network', 'Appearance', 'Advanced' to pre-select a tab.
+        """
         win = tk.Toplevel(self.root)
         win.title("Settings")
         win.geometry("650x480")
@@ -6412,6 +6431,16 @@ class DownloaderGUI:
         self.add_tooltip(speed_spin, "Limit download speed in KB/s (0 = unlimited)")
         self.add_tooltip(theme_combo, "Choose between light and dark mode.")
         self.add_tooltip(save_btn, "Save changes to settings.")
+
+        # If a specific tab was requested, select it
+        if tab:
+            try:
+                tab_map = {"general": 0, "network": 1, "appearance": 2, "advanced": 3}
+                idx = tab_map.get(str(tab).strip().lower())
+                if idx is not None:
+                    notebook.select(idx)
+            except Exception:
+                pass
 
     def force_full_hash_rescan(self):
         """Delete the hash cache file so the next scan will re-hash all files."""
