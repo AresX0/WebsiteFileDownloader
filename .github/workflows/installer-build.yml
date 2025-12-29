@@ -1,0 +1,63 @@
+name: Build Installer
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      include_playwright_browsers:
+        description: 'Set to "true" to include Playwright browser binaries in the build (large, slow)'
+        required: false
+        default: 'false'
+
+jobs:
+  test-and-build:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Run tests
+        run: |
+          pip install pytest
+          pytest -q
+
+      - name: Install Inno Setup (choco)
+        if: runner.os == 'Windows'
+        run: |
+          choco install innosetup -y
+        shell: powershell
+
+      - name: Run build script
+        shell: powershell
+        run: |
+          Set-Location -Path "${{ github.workspace }}"
+          $include = ${{ github.event.inputs.include_playwright_browsers }}
+          if ($include -eq 'true') {
+              .\installer\build_installer.ps1 -InstallDeps -Clean -IncludePlaywrightBrowsers
+          } else {
+              .\installer\build_installer.ps1 -InstallDeps -Clean
+          }
+
+      - name: Upload installer artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: epstein-installer
+          path: |
+            installer/inno/installer/output/*.exe
+            dist/**

@@ -1,0 +1,185 @@
+--- THREAD DUMP (mainloop-unresponsive) ---
+Thread ThreadPoolExecutor-4_2 (id=6992) stack:
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\ssl.py", line 1138, in read
+    return self._sslobj.read(len, buffer)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\ssl.py", line 1304, in recv_into
+    return self.read(nbytes, buffer)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\socket.py", line 725, in readinto
+    return self._sock.recv_into(b)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\http\client.py", line 493, in read
+    return s
+  File "C:\Projects\Website Downloader\.venv\Lib\site-packages\urllib3\response.py", line 1007, in _fp_read
+    return self._fp.read(amt) if amt is not None else self._fp.read()
+  File "C:\Projects\Website Downloader\.venv\Lib\site-packages\urllib3\response.py", line 1059, in _raw_read
+    return data
+  File "C:\Projects\Website Downloader\.venv\Lib\site-packages\urllib3\response.py", line 1155, in read
+    return data
+  File "C:\Projects\Website Downloader\.venv\Lib\site-packages\urllib3\response.py", line 1253, in stream
+    data = self.read(amt=amt, decode_content=decode_content)
+  File "C:\Projects\Website Downloader\.venv\Lib\site-packages\requests\models.py", line 820, in generate
+    yield from self.raw.stream(chunk_size, decode_content=True)
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 5923, in download_file
+    for chunk in r.iter_content(chunk_size=8192):
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\thread.py", line 73, in run
+    return fn(*args, **kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\thread.py", line 86, in run
+    result = ctx.run(self.task)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\thread.py", line 119, in _worker
+    work_item.run(ctx)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+Thread ThreadPoolExecutor-4_1 (id=19900) stack:
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1027, in handle
+    self.emit(record)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1737, in callHandlers
+    hdlr.handle(record)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1681, in handle
+    self.callHandlers(record)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1665, in _log
+    self.handle(record)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1520, in info
+    self._log(INFO, msg, args, **kwargs)
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 5908, in download_file
+    self.logger.info(
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\thread.py", line 73, in run
+    return fn(*args, **kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\thread.py", line 86, in run
+    result = ctx.run(self.task)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\thread.py", line 119, in _worker
+    work_item.run(ctx)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+Thread ThreadPoolExecutor-4_0 (id=1764) stack:
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1026, in handle
+    with self.lock:
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1737, in callHandlers
+    hdlr.handle(record)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1681, in handle
+    self.callHandlers(record)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1665, in _log
+    self.handle(record)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1520, in info
+    self._log(INFO, msg, args, **kwargs)
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 5908, in download_file
+    self.logger.info(
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\thread.py", line 73, in run
+    return fn(*args, **kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\thread.py", line 86, in run
+    result = ctx.run(self.task)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\thread.py", line 119, in _worker
+    work_item.run(ctx)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+Thread ThreadPoolExecutor-1_5 (id=15904) stack:
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 5256, in <lambda>
+    for chunk in iter(lambda: f.read(chunk_size), b""):
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 5257, in hash_file
+    sha256.update(chunk)
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 5315, in hash_file_worker
+    file_hash = self.hash_file(path)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\thread.py", line 73, in run
+    return fn(*args, **kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\thread.py", line 86, in run
+    result = ctx.run(self.task)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\thread.py", line 119, in _worker
+    work_item.run(ctx)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+Thread ThreadPoolExecutor-1_1 (id=5904) stack:
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 5257, in hash_file
+    sha256.update(chunk)
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 5315, in hash_file_worker
+    file_hash = self.hash_file(path)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\thread.py", line 73, in run
+    return fn(*args, **kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\thread.py", line 86, in run
+    result = ctx.run(self.task)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\thread.py", line 119, in _worker
+    work_item.run(ctx)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+Thread Thread-5 (run) (id=23732) stack:
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1133, in join
+    self._os_thread_handle.join(timeout)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\thread.py", line 273, in shutdown
+    t.join()
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\_base.py", line 667, in __exit__
+    self.shutdown(wait=True)
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 5327, in build_existing_hash_file
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 5499, in run
+    self.build_existing_hash_file(base_dir_cmp, self.hash_file_path)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+Thread Thread-3 (_heartbeat_monitor) (id=20056) stack:
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 1280, in _write_thread_dump
+    lineno = f.f_lineno
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 720, in _heartbeat_monitor
+    self._write_thread_dump('mainloop-unresponsive')
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+Thread Thread-2 (run) (id=21572) stack:
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 369, in wait
+    waiter.acquire()
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 670, in wait
+    signaled = self._cond.wait(timeout)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\_base.py", line 237, in as_completed
+    waiter.event.wait(wait_timeout)
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 5966, in download_files
+    for future in as_completed(future_to_info):
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 5875, in download_files
+    sub_skipped, sub_tree, sub_all = self.download_files(
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 5875, in download_files
+    sub_skipped, sub_tree, sub_all = self.download_files(
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 5570, in run
+    s, t, a = self.download_files(page, url, base_dir)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+Thread MainThread (id=38880) stack:
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\tkinter\__init__.py", line 2557, in report_callback_exception
+    print("Exception in Tkinter callback", file=sys.stderr)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\tkinter\__init__.py", line 1802, in _report_exception
+    root.report_callback_exception(exc, val, tb)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\tkinter\__init__.py", line 2092, in __call__
+    self.widget._report_exception()
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\tkinter\__init__.py", line 1613, in mainloop
+    self.tk.mainloop(n)
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 6639, in main
+    root.mainloop()
+  File "C:\Users\doran\AppData\Local\Temp\epstein_launch_b5557a25-0665-4038-b0fa-f7e2149e37dc.py", line 13, in <module>
+    gui.main()
+--- END THREAD DUMP ---

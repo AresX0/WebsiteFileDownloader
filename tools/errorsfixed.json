@@ -1,0 +1,39 @@
+[
+  {
+    "timestamp": "2025-12-26T18:46:47Z",
+    "error": "File partially corrupted / duplicated content",
+    "fix": "Restored epstein_downloader_gui.py from BackupGui.py (known-good source), ensuring a single coherent codebase.",
+    "why": "Multiple concatenated copies caused duplicate definitions and execution ordering bugs."
+  },
+  {
+    "timestamp": "2025-12-26T18:51:15Z",
+    "error": "main() called before DownloaderGUI was defined (NameError)",
+    "fix": "Removed duplicate earlier main() definitions and ensured only one main() exists (final one) after all classes are defined.",
+    "why": "Instantiating classes before their definitions caused runtime NameError."
+  },
+  {
+    "timestamp": "2025-12-26T18:52:00Z",
+    "error": "UnboundLocalError in ensure_pip",
+    "fix": "Moved ensurepip.bootstrap() and import pip into the ImportError block so ensurepip is referenced only when imported.",
+    "why": "Calling ensurepip.bootstrap() unconditionally caused UnboundLocalError when pip existed."
+  },
+  {
+    "timestamp": "2025-12-26T18:53:00Z",
+    "error": "Missing importlib.util",
+    "fix": "Added importlib.util import at top of file to allow importlib.util.find_spec usage.",
+    "why": "importlib.util.find_spec was being used but not imported, causing AttributeError."
+  },
+  {
+    "timestamp": "2025-12-26T18:54:00Z",
+    "error": "Scope issue with progress dialog variables",
+    "fix": "Adjusted nonlocal usage and reset both progress_win and progress_label in close_progress() to avoid referencing undefined locals.",
+    "why": "close_progress referenced progress_win without ensuring both were nonlocal and reset."
+  },
+  {
+    "timestamp": "2025-12-26T20:49:12Z",
+    "error": "GUI appeared invisible to user",
+    "fix": "Added a visible startup confirmation dialog (messagebox.showinfo) immediately after GUI initialization to confirm the window was created.",
+    "why": "On some systems the main window may be hidden or behind other windows; a blocking dialog confirms startup and aids debugging."
+  }
+]
+

@@ -1,0 +1,9 @@
+{
+  "auto_start": true,
+  "download_dir": "C:\\Temp\\Epstein_saved_test",
+  "log_dir": "c:\\Projects\\Website Downloader\\test_logs",
+  "concurrent_downloads": 3,
+  "credentials_path": "C:\\Temp\\credentials_saved_test.json",
+  "start_minimized": true,
+  "use_gdown_fallback": true
+}
