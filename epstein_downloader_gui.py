@@ -214,37 +214,39 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import logging
 
-# Utility: check whether a logger has any open handlers with writable streams.
-# This centralizes the previously duplicated inline checks used before attempting
-# to call logger methods during teardown/diagnostics.
-def _handlers_open(logger):
-    """Return True if the given logger has at least one handler that appears to have an open stream.
-
-    The heuristic checks handler.stream.closed where available, otherwise assumes the handler
-    can write. This function is deliberately defensive to avoid raising during interpreter
-    teardown when handlers may be partially closed.
-    """
-    try:
-        if logger is None:
-            return False
-        handlers = getattr(logger, 'handlers', None)
-        if not handlers:
-            return False
-        for _h in handlers:
-            try:
-                s = getattr(_h, 'stream', None)
-                # If no stream attribute, assume handler is usable (e.g., SocketHandler)
-                if s is None:
+# Diagnostics helpers are implemented in a separate module for reuse and
+# easier testing. Import the useful helpers here for local use.
+try:
+    from diagnostics import handlers_open, capture_thread_dump, write_thread_dump_file, safe_log_dump
+except Exception:
+    # If diagnostics import fails (should not happen in normal runs), provide
+    # a conservative fallback implementation for handlers_open so diagnostic
+    # code remains defensive rather than raising at import time.
+    def handlers_open(logger):
+        try:
+            if logger is None:
+                return False
+            handlers = getattr(logger, 'handlers', None)
+            if not handlers:
+                return False
+            for _h in handlers:
+                try:
+                    s = getattr(_h, 'stream', None)
+                    if s is None:
+                        return True
+                    if not getattr(s, 'closed', False):
+                        return True
+                except Exception:
                     return True
-                # If stream has 'closed' attribute and is False, it's open
-                if not getattr(s, 'closed', False):
-                    return True
-            except Exception:
-                # If checking a handler fails, be conservative and assume it's open
-                return True
-        return False
-    except Exception:
-        return False
+            return False
+        except Exception:
+            return False
+    def capture_thread_dump(reason=''):
+        return ''
+    def write_thread_dump_file(text, log_dir=None, prefix='thread_dump'):
+        return None
+    def safe_log_dump(logger, message, dump_text, log_dir=None):
+        return
 
 # Default installation directory; overridable via EPISTEIN_INSTALL_DIR env var
 INSTALL_DIR = os.environ.get(
@@ -6458,13 +6460,13 @@ for name, fn in [
 # Provide a minimal implementation for download_drive_folder_api if missing
 if not hasattr(DownloaderGUI, 'download_drive_folder_api'):
     def _compat_download_drive_folder_api(self, folder_id, gdrive_dir, credentials_path=None):
-    """Compatibility shim for Drive API folder download.
+        """Compatibility shim for Drive API folder download.
 
-    Provide a minimal behavior that attempts to list files for the supplied
-    `folder_id` using the Drive API client. Used primarily to make tests that
-    expect this method to exist pass when `googleapiclient` may not be installed
-    or when full behavior is provided elsewhere.
-    """
+        Provide a minimal behavior that attempts to list files for the supplied
+        `folder_id` using the Drive API client. Used primarily to make tests that
+        expect this method to exist pass when `googleapiclient` may not be installed
+        or when full behavior is provided elsewhere.
+        """
         try:
             from googleapiclient.discovery import build
         except Exception:
@@ -6657,133 +6659,18 @@ def main():
     try:
         def _dump_thread_stacks(reason=""):
             try:
-                import sys as _sys, logging as _logging, linecache as _linecache, threading as _threading, os as _os, time as _time
-                logger = _logging.getLogger("EpsteinFilesDownloader")
-                header = f"--- THREAD DUMP ({reason}) ---"
+                logger = logging.getLogger("EpsteinFilesDownloader")
+                dump_text = capture_thread_dump(reason)
+                # Safe logging/write with file fallback
                 try:
-                    def _handlers_open():
-                        try:
-                            if not getattr(logger, 'handlers', None):
-                                return False
-                            for _h in getattr(logger, 'handlers', []):
-                                s = getattr(_h, 'stream', None)
-                                try:
-                                    if s is None:
-                                        return True
-                                    if not getattr(s, 'closed', False):
-                                        return True
-                                except Exception:
-                                    return True
-                            return False
-                        except Exception:
-                            return False
-
-                    if _handlers_open():
-                        try:
-                            logger.error(header)
-                        except Exception:
-                            pass
-                    else:
-                        # Fallback: write a small marker to logs directory directly
-                        try:
-                            logs_dir = getattr(sys.modules.get('epstein_downloader_gui', None), 'log_dir', None) or os.path.join(os.getcwd(), 'logs')
-                            os.makedirs(logs_dir, exist_ok=True)
-                            with open(os.path.join(logs_dir, 'heartbeat_errors.txt'), 'a', encoding='utf-8') as _efh:
-                                _efh.write(header + '\n')
-                        except Exception:
-                            pass
-                except Exception:
-                    # Logging/disk IO may be unavailable during shutdown; ignore
-                    pass
-
-                frames = _sys._current_frames()
-                try:
-                    thread_name_by_id = {t.ident: t.name for t in _threading.enumerate()}
-                except Exception:
-                    thread_name_by_id = {}
-
-                output_lines = [header]
-                for tid, frame in frames.items():
-                    try:
-                        tname = thread_name_by_id.get(tid, str(tid))
-                        output_lines.append(f"Thread {tname} (id={tid}) stack:")
-                        # Walk the frame chain safely and collect best-effort lines
-                        f = frame
-                        while f is not None:
-                            try:
-                                co = f.f_code
-                                filename = co.co_filename
-                                lineno = f.f_lineno
-                                func = co.co_name
-                                src = _linecache.getline(filename, lineno).strip()
-                                output_lines.append(f'  File "{filename}", line {lineno}, in {func}')
-                                output_lines.append(f'    {src}')
-                            except Exception:
-                                output_lines.append('  <frame formatting failed>')
-                            try:
-                                f = f.f_back
-                            except Exception:
-                                break
-                    except Exception:
-                        try:
-                            logger.exception("Failed to format thread %s stack", tid)
-                        except Exception:
-                            pass
-
-                output_lines.append("--- END THREAD DUMP ---")
-                dump_text = "\n".join(output_lines)
-                try:
-                    try:
-                        if _handlers_open(logger):
-                            try:
-                                logger.error(dump_text)
-                            except Exception:
-                                pass
-                        else:
-                            try:
-                                import tempfile as _tempfile
-                                td = _tempfile.gettempdir()
-                                fpath = os.path.join(td, f"thread_dump_{reason}_{int(time.time())}_{os.getpid()}.txt")
-                                with open(fpath, 'w', encoding='utf-8') as fh:
-                                    fh.write(dump_text)
-                            except Exception:
-                                try:
-                                    print('THREAD DUMP (fallback):')
-                                    print(dump_text)
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
+                    safe_log_dump(logger, f"--- THREAD DUMP ({reason}) ---", dump_text, log_dir=None)
                 except Exception:
                     pass
-
-                # Best-effort: log the dump
+            except Exception:
                 try:
-                    logger.error(dump_text)
+                    logging.getLogger("EpsteinFilesDownloader").exception("Failed to produce thread dump")
                 except Exception:
                     pass
-
-                # File-based fallback: write a raw dump to disk using direct I/O so we have a persistent copy even under logging shutdown
-                try:
-                    logs_dir = None
-                    # Prefer known log locations if available
-                    candidate_dirs = [
-                        getattr(__import__('os'), 'getcwd')(),
-                        _os.path.join(getattr(__import__('os'), 'getcwd')(), 'logs'),
-                        _os.path.join(_os.path.expanduser('~'), 'AppData', 'Local', 'EpsteinFilesDownloader', 'logs') if _os.name == 'nt' else None,
-                    ]
-                    for d in candidate_dirs:
-                        if not d:
-                            continue
-                        try:
-                            _os.makedirs(d, exist_ok=True)
-                            logs_dir = d
-                            break
-                        except Exception:
-                            continue
-                    if not logs_dir:
-                        logs_dir = _os.getcwd()
-                    ts = _time.strftime('%Y%m%d_%H%M%S')
                     pid = _os.getpid()
                     fname = f"thread_dump_{ts}_{pid}.txt"
                     fpath = _os.path.join(logs_dir, fname)
