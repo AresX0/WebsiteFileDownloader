@@ -6400,6 +6400,12 @@ def _compat_pick_credentials_file(self):
 
 
 def _compat_import_settings(self):
+    """Compatibility wrapper for importing settings from a file.
+
+    This stub provides a minimal import flow so older tests or UIs that call
+    `import_settings` will behave in a predictable way even if a more
+    feature-rich implementation is not present.
+    """
     # Simple wrapper that calls the (possibly existing) import logic if present.
     try:
         # If a robust implementation exists elsewhere as a function, call it; otherwise prompt for a file and perform a basic import
@@ -6452,6 +6458,13 @@ for name, fn in [
 # Provide a minimal implementation for download_drive_folder_api if missing
 if not hasattr(DownloaderGUI, 'download_drive_folder_api'):
     def _compat_download_drive_folder_api(self, folder_id, gdrive_dir, credentials_path=None):
+    """Compatibility shim for Drive API folder download.
+
+    Provide a minimal behavior that attempts to list files for the supplied
+    `folder_id` using the Drive API client. Used primarily to make tests that
+    expect this method to exist pass when `googleapiclient` may not be installed
+    or when full behavior is provided elsewhere.
+    """
         try:
             from googleapiclient.discovery import build
         except Exception:
@@ -6489,6 +6502,12 @@ if not hasattr(DownloaderGUI, 'download_drive_folder_api'):
 
 # Hotfix: fallback create_widgets (temporary)
 def _create_widgets_fallback(self):
+    """Minimal create_widgets fallback to provide a usable UI surface.
+
+    This fallback is only used when the main `create_widgets` is missing or
+    fails; it provides a small, testable subset of the UI so automated tests
+    that assert presence of basic controls can proceed.
+    """
     try:
         self.logger.info("fallback create_widgets: start")
     except Exception:
