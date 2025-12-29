@@ -3467,6 +3467,33 @@ class DownloaderGUI:
         except Exception:
             return False
 
+
+# --- Traversal helpers (testable, pure-ish helpers) ---
+def collect_links_from_page(page, base_url):
+    """Collect hrefs from a Playwright-like `page` object and return absolute URLs.
+
+    - page: object exposing `query_selector_all('a')` returning objects with
+      `.get_attribute('href')`.
+    - base_url: used with urllib.parse.urljoin to resolve relative links.
+
+    Returns a list of absolute URLs (strings).
+    """
+    hrefs = []
+    try:
+        links = page.query_selector_all("a")
+    except Exception:
+        return hrefs
+    for link in links:
+        try:
+            href = link.get_attribute("href")
+            if not href:
+                continue
+            abs_url = urllib.parse.urljoin(base_url, href)
+            hrefs.append(abs_url)
+        except Exception:
+            continue
+    return hrefs
+
     # --- Download Logic ---
     def start_download(self):
         self.logger.debug("start_download called.")
