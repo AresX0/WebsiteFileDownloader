@@ -103,11 +103,19 @@ def acquire_single_instance_lock(lockfile=None):
 
     On Windows this uses a named global mutex. On other platforms it falls back to a simple
     exclusive lock file in the temp directory.
-    Returns an opaque token that should be passed to release_single_instance_lock().
+
+    Returns a token describing the acquired lock; the token formats are:
+      - ("mutex", handle)   : Windows mutex handle
+      - ("file", fd, path)  : file descriptor & lock file path
+      - ("inmem", True)     : in-memory lock used for pytest/explicit bypass
+      - ("noop", None)      : explicit no-op token when bypassed
+
+    Pass the returned token to `release_single_instance_lock(token)` to release the lock.
+
     Raises RuntimeError if the lock cannot be acquired.
 
     For test determinism, set environment variable `EPISTEIN_NO_SINGLE_INSTANCE_LOCK=1` to
-    bypass acquiring a system-wide mutex or lock file and return a noop token instead.
+    bypass acquiring a system-wide mutex or lock file and return an in-memory token instead.
     """
     global _MUTEX_HANDLE, _INMEM_LOCK
     # Test-friendly bypass: return a noop token when the env var is set
@@ -205,6 +213,38 @@ def release_single_instance_lock(token):
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import logging
+
+# Utility: check whether a logger has any open handlers with writable streams.
+# This centralizes the previously duplicated inline checks used before attempting
+# to call logger methods during teardown/diagnostics.
+def _handlers_open(logger):
+    """Return True if the given logger has at least one handler that appears to have an open stream.
+
+    The heuristic checks handler.stream.closed where available, otherwise assumes the handler
+    can write. This function is deliberately defensive to avoid raising during interpreter
+    teardown when handlers may be partially closed.
+    """
+    try:
+        if logger is None:
+            return False
+        handlers = getattr(logger, 'handlers', None)
+        if not handlers:
+            return False
+        for _h in handlers:
+            try:
+                s = getattr(_h, 'stream', None)
+                # If no stream attribute, assume handler is usable (e.g., SocketHandler)
+                if s is None:
+                    return True
+                # If stream has 'closed' attribute and is False, it's open
+                if not getattr(s, 'closed', False):
+                    return True
+            except Exception:
+                # If checking a handler fails, be conservative and assume it's open
+                return True
+        return False
+    except Exception:
+        return False
 
 # Default installation directory; overridable via EPISTEIN_INSTALL_DIR env var
 INSTALL_DIR = os.environ.get(
@@ -802,37 +842,22 @@ class DownloaderGUI:
                             # If no heartbeat for 3s, treat as unresponsive and write a dump
                             if stagnant >= 3:
                                 try:
-                                    # If logger handlers are closed (teardown), avoid calling logger.error which can raise
-                                    def _logger_handlers_open():
-                                        try:
-                                            if not hasattr(self, 'logger') or not getattr(self.logger, 'handlers', None):
-                                                return False
-                                            for _h in getattr(self.logger, 'handlers', []):
-                                                s = getattr(_h, 'stream', None)
-                                                try:
-                                                    if s is None:
-                                                        return True
-                                                    if not getattr(s, 'closed', False):
-                                                        return True
-                                                except Exception:
-                                                    return True
-                                            return False
-                                        except Exception:
-                                            return False
-
-                                    if _logger_handlers_open():
-                                        try:
-                                            self.logger.error("Mainloop unresponsive for %d seconds; capturing thread dump", stagnant)
-                                        except Exception:
-                                            pass
-                                    else:
-                                        try:
-                                            md = getattr(self, 'log_dir', None) or __import__('os').path.join(__import__('os').getcwd(), 'logs')
-                                            __import__('os').makedirs(md, exist_ok=True)
-                                            with open(__import__('os').path.join(md, 'heartbeat_errors.txt'), 'a', encoding='utf-8') as _efh:
-                                                _efh.write(f"Mainloop unresponsive for {stagnant} seconds; capturing thread dump\n")
-                                        except Exception:
-                                            pass
+                                    try:
+                                        if _handlers_open(self.logger):
+                                            try:
+                                                self.logger.error("Mainloop unresponsive for %d seconds; capturing thread dump", stagnant)
+                                            except Exception:
+                                                pass
+                                        else:
+                                            try:
+                                                md = getattr(self, 'log_dir', None) or __import__('os').path.join(__import__('os').getcwd(), 'logs')
+                                                __import__('os').makedirs(md, exist_ok=True)
+                                                with open(__import__('os').path.join(md, 'heartbeat_errors.txt'), 'a', encoding='utf-8') as _efh:
+                                                    _efh.write(f"Mainloop unresponsive for {stagnant} seconds; capturing thread dump\n")
+                                            except Exception:
+                                                pass
+                                    except Exception:
+                                        pass
                                 except Exception:
                                     pass
                                 try:
@@ -1438,37 +1463,22 @@ class DownloaderGUI:
                     with open(fpath, 'w', encoding='utf-8') as fh:
                         fh.write(dump_text)
                     try:
-                        # Prefer logging when handlers are available, otherwise fall back to a file write
-                        def _handlers_open():
-                            try:
-                                if not hasattr(self, 'logger') or not getattr(self.logger, 'handlers', None):
-                                    return False
-                                for _h in getattr(self.logger, 'handlers', []):
-                                    s = getattr(_h, 'stream', None)
-                                    try:
-                                        if s is None:
-                                            return True
-                                        if not getattr(s, 'closed', False):
-                                            return True
-                                    except Exception:
-                                        return True
-                                return False
-                            except Exception:
-                                return False
-
-                        if _handlers_open():
-                            try:
-                                self.logger.error('Wrote thread dump to file: %s', fpath)
-                            except Exception:
-                                pass
-                        else:
-                            try:
-                                logs_dir = getattr(self, 'log_dir', None) or _os.path.join(_os.getcwd(), 'logs')
-                                _os.makedirs(logs_dir, exist_ok=True)
-                                with open(_os.path.join(logs_dir, 'heartbeat_errors.txt'), 'a', encoding='utf-8') as _efh:
-                                    _efh.write(f'Wrote thread dump to file: {fpath}\n')
-                            except Exception:
-                                pass
+                        try:
+                            if _handlers_open(self.logger):
+                                try:
+                                    self.logger.error('Wrote thread dump to file: %s', fpath)
+                                except Exception:
+                                    pass
+                            else:
+                                try:
+                                    logs_dir = getattr(self, 'log_dir', None) or _os.path.join(_os.getcwd(), 'logs')
+                                    _os.makedirs(logs_dir, exist_ok=True)
+                                    with open(_os.path.join(logs_dir, 'heartbeat_errors.txt'), 'a', encoding='utf-8') as _efh:
+                                        _efh.write(f'Wrote thread dump to file: {fpath}\n')
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
                     except Exception:
                         pass
                 except Exception:
@@ -1484,37 +1494,22 @@ class DownloaderGUI:
                     with open(fpath, 'w', encoding='utf-8') as fh:
                         fh.write(dump_text)
                     try:
-                        # Prefer logging when handlers are available, otherwise fall back to a file write
-                        def _handlers_open2():
-                            try:
-                                if not hasattr(self, 'logger') or not getattr(self.logger, 'handlers', None):
-                                    return False
-                                for _h in getattr(self.logger, 'handlers', []):
-                                    s = getattr(_h, 'stream', None)
-                                    try:
-                                        if s is None:
-                                            return True
-                                        if not getattr(s, 'closed', False):
-                                            return True
-                                    except Exception:
-                                        return True
-                                return False
-                            except Exception:
-                                return False
-
-                        if _handlers_open2():
-                            try:
-                                self.logger.error('Wrote thread dump to temp file: %s', fpath)
-                            except Exception:
-                                pass
-                        else:
-                            try:
-                                logs_dir = getattr(self, 'log_dir', None) or _os.path.join(_os.getcwd(), 'logs')
-                                _os.makedirs(logs_dir, exist_ok=True)
-                                with open(_os.path.join(logs_dir, 'heartbeat_errors.txt'), 'a', encoding='utf-8') as _efh:
-                                    _efh.write(f'Wrote thread dump to temp file: {fpath}\n')
-                            except Exception:
-                                pass
+                        try:
+                            if _handlers_open(self.logger):
+                                try:
+                                    self.logger.error('Wrote thread dump to temp file: %s', fpath)
+                                except Exception:
+                                    pass
+                            else:
+                                try:
+                                    logs_dir = getattr(self, 'log_dir', None) or _os.path.join(_os.getcwd(), 'logs')
+                                    _os.makedirs(logs_dir, exist_ok=True)
+                                    with open(_os.path.join(logs_dir, 'heartbeat_errors.txt'), 'a', encoding='utf-8') as _efh:
+                                        _efh.write(f'Wrote thread dump to temp file: {fpath}\n')
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
                     except Exception:
                         pass
                 except Exception as e:
@@ -3546,6 +3541,18 @@ class DownloaderGUI:
         )
 
     def download_gdrive_with_fallback(self, url, gdrive_dir, credentials_path):
+        """Download a Google Drive folder with API first, optionally falling back to gdown.
+
+        Parameters
+        - url: the Google Drive folder URL
+        - gdrive_dir: local destination directory
+        - credentials_path: path to service account JSON (optional)
+
+        Behavior:
+        - If credentials are present and API download succeeds, use the Drive API.
+        - If API is not available or fails, and the user requested 'gdown' fallback, attempt gdown.
+        - Provides user-facing prompts via messageboxes and logs actions.
+        """
         import re
 
         try:
@@ -3651,6 +3658,15 @@ class DownloaderGUI:
         file_tree=None,
         all_files=None,
     ):
+        """Thread-aware download traversal and file fetcher.
+
+        This routine traverses `base_url` using a Playwright `page` object, collects file
+        links, and performs threaded downloads of files found on the page. It is similar
+        to `download_files` but tailored for multi-threaded downloads and cooperative
+        pause/stop behavior via `self._pause_event` and `self._stop_event`.
+
+        Returns a tuple (skipped_files_set, file_tree_dict, all_files_set).
+        """
         allowed_domains = [
             "https://www.justice.gov/epstein",
             "https://oversight.house.gov/release/oversight-committee-releases-epstein-records-provided-by-the-department-of-justice/",
@@ -5326,6 +5342,17 @@ class DownloaderGUI:
         )
 
     def download_gdrive_folder(self, folder_url, output_dir):
+        """Download a Google Drive folder using `gdown.download_folder`.
+
+        This helper is used when the API-based `download_drive_folder_api` cannot be
+        used (e.g., missing credentials) and the user opted into the gdown fallback.
+
+        Parameters:
+        - folder_url: Google Drive folder URL
+        - output_dir: local directory to place downloaded files
+
+        Returns a list of tuples (relative_path, dest_path) for downloaded files.
+        """
         import gdown
         import logging
 
@@ -5977,6 +6004,15 @@ class DownloaderGUI:
         file_tree=None,
         all_files=None,
     ):
+        """Synchronous download traversal for Playwright `page`.
+
+        Walks links discovered on `base_url`, records candidate files in `file_tree` and
+        `all_files`, and performs synchronous downloads (used by `download_all` and
+        `process_download_queue`). Uses cooperative pause/stop via `self._pause_event`
+        and `self._stop_event`.
+
+        Returns a tuple (skipped_files_set, file_tree_dict, all_files_set).
+        """
 
         allowed_domains = [
             "https://www.justice.gov/epstein",
@@ -6678,42 +6714,27 @@ def main():
                 output_lines.append("--- END THREAD DUMP ---")
                 dump_text = "\n".join(output_lines)
                 try:
-                    # Prefer logging when available; otherwise write dump to a temp file directly
-                    def _handlers_open2():
-                        try:
-                            if not getattr(logger, 'handlers', None):
-                                return False
-                            for _h in getattr(logger, 'handlers', []):
-                                s = getattr(_h, 'stream', None)
-                                try:
-                                    if s is None:
-                                        return True
-                                    if not getattr(s, 'closed', False):
-                                        return True
-                                except Exception:
-                                    return True
-                            return False
-                        except Exception:
-                            return False
-
-                    if _handlers_open2():
-                        try:
-                            logger.error(dump_text)
-                        except Exception:
-                            pass
-                    else:
-                        try:
-                            import tempfile as _tempfile
-                            td = _tempfile.gettempdir()
-                            fpath = os.path.join(td, f"thread_dump_{reason}_{int(time.time())}_{os.getpid()}.txt")
-                            with open(fpath, 'w', encoding='utf-8') as fh:
-                                fh.write(dump_text)
-                        except Exception:
+                    try:
+                        if _handlers_open(logger):
                             try:
-                                print('THREAD DUMP (fallback):')
-                                print(dump_text)
+                                logger.error(dump_text)
                             except Exception:
                                 pass
+                        else:
+                            try:
+                                import tempfile as _tempfile
+                                td = _tempfile.gettempdir()
+                                fpath = os.path.join(td, f"thread_dump_{reason}_{int(time.time())}_{os.getpid()}.txt")
+                                with open(fpath, 'w', encoding='utf-8') as fh:
+                                    fh.write(dump_text)
+                            except Exception:
+                                try:
+                                    print('THREAD DUMP (fallback):')
+                                    print(dump_text)
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
                 except Exception:
                     pass
 

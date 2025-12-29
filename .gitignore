@@ -37,3 +37,8 @@ venv/
 # Logs and test artifacts
 test_logs/
 *.log
+thread_dump_*.txt
+mainloop_unresponsive_marker.txt
+epstein_downloader_gui.py.backup*
+*.bak
+tools/collected_logs/
