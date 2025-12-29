@@ -2150,8 +2150,12 @@ class DownloaderGUI:
                 except Exception:
                     need_create = True
             if need_create:
-                # Try to create placeholder
-                created = self.create_placeholder_asset(p, name)
+                # Try to create placeholder (delegating to assets helper when available)
+                try:
+                    from assets import create_placeholder_asset
+                    created = create_placeholder_asset(p, name, logger=self.logger)
+                except Exception:
+                    created = self.create_placeholder_asset(p, name)
                 if not created:
                     # Fallback: write minimal PNG to ensure non-empty file for tests and GUI
                     tiny_png = (
@@ -2166,11 +2170,15 @@ class DownloaderGUI:
                             self.logger.warning(f"Failed to write fallback asset {p}")
                         except Exception:
                             pass
-        # Normalize sizes after ensuring presence
+        # Normalize sizes after ensuring presence (delegate to assets helper when available)
         try:
-            self.ensure_asset_sizes(target_px=24)
+            from assets import ensure_asset_sizes
+            ensure_asset_sizes(assets_dir, target_px=24, logger=self.logger)
         except Exception:
-            pass
+            try:
+                self.ensure_asset_sizes(target_px=24)
+            except Exception:
+                pass
 
     def show_toast(self, message, duration=1500):
         """Show a transient non-blocking 'toast' message near the bottom-right of the main window.
