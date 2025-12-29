@@ -1,10 +1,14 @@
 import time
 import tkinter as tk
+import pytest
 from epstein_downloader_gui import DownloaderGUI
 
 # Create a hidden Tk root so widgets are initialized but no window shows
-root = tk.Tk()
-root.withdraw()
+try:
+    root = tk.Tk()
+    root.withdraw()
+except tk.TclError:
+    pytest.skip("Skipping UI tests - Tcl/Tk not available", allow_module_level=True)
 app = DownloaderGUI(root)
 # Allow logger and widgets to initialize
 time.sleep(0.2)

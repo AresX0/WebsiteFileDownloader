@@ -1,0 +1,13 @@
+import os, sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+os.environ['EPISTEIN_SKIP_INSTALL'] = '1'
+import epstein_downloader_gui as gui
+# Bypass single-instance lock
+gui.acquire_single_instance_lock = lambda *a, **k: ('noop', None)
+gui.release_single_instance_lock = lambda *a, **k: None
+
+root = gui.tk.Tk()
+root.withdraw()
+app = gui.DownloaderGUI(root)
+app._write_thread_dump('direct-test')
+print('done')

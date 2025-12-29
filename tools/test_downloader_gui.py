@@ -1,6 +1,7 @@
 import unittest
 from epstein_downloader_gui import DownloaderGUI
 import tkinter as tk
+import os
 import json
 
 class TestDownloaderGUI(unittest.TestCase):

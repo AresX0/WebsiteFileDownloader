@@ -1,0 +1,42 @@
+--- THREAD DUMP (atexit) ---
+Thread Thread-11 (_cancel_watcher) (id=25536) stack:
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 369, in wait
+    waiter.acquire()
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 670, in wait
+    signaled = self._cond.wait(timeout)
+  File "c:\Projects\Website Downloader\epstein_downloader_gui.py", line 314, in _cancel_watcher
+    cancel_event.wait()
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+Thread Thread-6 (_cancel_watcher) (id=16592) stack:
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 369, in wait
+    waiter.acquire()
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 670, in wait
+    signaled = self._cond.wait(timeout)
+  File "c:\Projects\Website Downloader\epstein_downloader_gui.py", line 314, in _cancel_watcher
+    cancel_event.wait()
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+Thread Thread-1 (_heartbeat_monitor) (id=22112) stack:
+  File "c:\Projects\Website Downloader\epstein_downloader_gui.py", line 779, in _heartbeat_monitor
+    _time.sleep(1.0)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+Thread MainThread (id=34516) stack:
+  File "c:\Projects\Website Downloader\epstein_downloader_gui.py", line 6602, in _dump_thread_stacks
+    lineno = f.f_lineno
+  File "c:\Projects\Website Downloader\epstein_downloader_gui.py", line 6702, in <lambda>
+    _atexit.register(lambda: _dump_thread_stacks('atexit'))
+--- END THREAD DUMP ---

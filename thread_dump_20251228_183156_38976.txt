@@ -1,0 +1,63 @@
+--- THREAD DUMP (atexit) ---
+Thread Thread-12 (_cancel_watcher) (id=28928) stack:
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 369, in wait
+    waiter.acquire()
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 670, in wait
+    signaled = self._cond.wait(timeout)
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 244, in _cancel_watcher
+    cancel_event.wait()
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+Thread Thread-7 (_cancel_watcher) (id=31460) stack:
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 369, in wait
+    waiter.acquire()
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 670, in wait
+    signaled = self._cond.wait(timeout)
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 244, in _cancel_watcher
+    cancel_event.wait()
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+Thread Thread-2 (_heartbeat_monitor) (id=36704) stack:
+  File "<frozen os>", line 224, in makedirs
+    
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 684, in _heartbeat_monitor
+    __import__('os').makedirs(md, exist_ok=True)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+Thread Thread-1 (_heartbeat_monitor) (id=30844) stack:
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1026, in handle
+    with self.lock:
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1737, in callHandlers
+    hdlr.handle(record)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1681, in handle
+    self.callHandlers(record)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1665, in _log
+    self.handle(record)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1549, in error
+    self._log(ERROR, msg, args, **kwargs)
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 677, in _heartbeat_monitor
+    self.logger.error("Mainloop unresponsive for %d seconds; capturing thread dump", stagnant)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Users\doran\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1044, in _bootstrap
+    self._bootstrap_inner()
+Thread MainThread (id=31000) stack:
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 6333, in _dump_thread_stacks
+    lineno = f.f_lineno
+  File "C:\Projects\Website Downloader\epstein_downloader_gui.py", line 6433, in <lambda>
+    _atexit.register(lambda: _dump_thread_stacks('atexit'))
+--- END THREAD DUMP ---
