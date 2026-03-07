@@ -1,0 +1,18 @@
+<Project>
+  <PropertyGroup>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisMode>Recommended</AnalysisMode>
+    <CodeAnalysisTreatWarningsAsErrors>false</CodeAnalysisTreatWarningsAsErrors>
+    <AllowMissingPrunePackageData>true</AllowMissingPrunePackageData>
+    <NoWarn>
+      $(NoWarn);
+      CA1001;CA1050;CA1051;CA1068;CA1304;CA1311;CA1507;CA1512;CA1513;
+      CA1805;CA1806;CA1835;CA1838;CA1850;CA1854;CA1859;CA1860;CA1862;
+      CA1866;CA1868;CA1869;CA1872;CA1816;CA2007;CA2024;CA2101;CA5350;
+      CA5351;CA1031;CA1303;CA1305;CA1307;CA1308;CA1310;CA1822;CA1852;CA1861
+    </NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="10.0.100" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

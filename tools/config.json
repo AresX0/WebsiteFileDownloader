@@ -1,12 +1,12 @@
 {
   "download_dir": "C:\\Temp\\Epstein",
-  "log_dir": "C:\\temp\\Epstein\\Logs",
-  "credentials_path": "C:\\Projects\\Website Downloader\\tools\\credentials.json",
-  "concurrent_downloads": 3,
+  "log_dir": "C:\\Projects\\Website Downloader\\logs",
+  "credentials_path": "C:\\Projects\\Website Downloader\\tmp_creds2.json",
+  "concurrent_downloads": 6,
   "proxy": "",
   "speed_limit_kbps": 0,
   "theme": "light",
-  "use_gdown_fallback": true,
+  "use_gdown_fallback": false,
   "url_list": [
     "https://www.justice.gov/epstein/court-records",
     "https://oversight.house.gov/release/oversight-committee-releases-epstein-records-provided-by-the-department-of-justice/",

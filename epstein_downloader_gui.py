@@ -43,6 +43,19 @@ import subprocess
 import tempfile
 import ctypes
 
+# Optional Pillow imports (guarded so module can be imported when Pillow is not installed).
+# This avoids import-time failures and clarifies optional use of Pillow for icon/asset generation.
+try:
+    from PIL import Image, ImageDraw, ImageTk, ImageFont  # type: ignore
+    HAVE_PIL = True
+except Exception:
+    Image = None
+    ImageDraw = None
+    ImageTk = None
+    ImageFont = None
+    HAVE_PIL = False
+
+
 # Small helper wrapper for safely exposing values to background threads after GUI shutdown.
 class _SafeVar:
     """Provides a minimal get()/set() interface that is safe after Tk is torn down."""
@@ -103,19 +116,11 @@ def acquire_single_instance_lock(lockfile=None):
 
     On Windows this uses a named global mutex. On other platforms it falls back to a simple
     exclusive lock file in the temp directory.
-
-    Returns a token describing the acquired lock; the token formats are:
-      - ("mutex", handle)   : Windows mutex handle
-      - ("file", fd, path)  : file descriptor & lock file path
-      - ("inmem", True)     : in-memory lock used for pytest/explicit bypass
-      - ("noop", None)      : explicit no-op token when bypassed
-
-    Pass the returned token to `release_single_instance_lock(token)` to release the lock.
-
+    Returns an opaque token that should be passed to release_single_instance_lock().
     Raises RuntimeError if the lock cannot be acquired.
 
     For test determinism, set environment variable `EPISTEIN_NO_SINGLE_INSTANCE_LOCK=1` to
-    bypass acquiring a system-wide mutex or lock file and return an in-memory token instead.
+    bypass acquiring a system-wide mutex or lock file and return a noop token instead.
     """
     global _MUTEX_HANDLE, _INMEM_LOCK
     # Test-friendly bypass: return a noop token when the env var is set
@@ -213,40 +218,6 @@ def release_single_instance_lock(token):
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import logging
-
-# Diagnostics helpers are implemented in a separate module for reuse and
-# easier testing. Import the useful helpers here for local use.
-try:
-    from diagnostics import handlers_open, capture_thread_dump, write_thread_dump_file, safe_log_dump
-except Exception:
-    # If diagnostics import fails (should not happen in normal runs), provide
-    # a conservative fallback implementation for handlers_open so diagnostic
-    # code remains defensive rather than raising at import time.
-    def handlers_open(logger):
-        try:
-            if logger is None:
-                return False
-            handlers = getattr(logger, 'handlers', None)
-            if not handlers:
-                return False
-            for _h in handlers:
-                try:
-                    s = getattr(_h, 'stream', None)
-                    if s is None:
-                        return True
-                    if not getattr(s, 'closed', False):
-                        return True
-                except Exception:
-                    return True
-            return False
-        except Exception:
-            return False
-    def capture_thread_dump(reason=''):
-        return ''
-    def write_thread_dump_file(text, log_dir=None, prefix='thread_dump'):
-        return None
-    def safe_log_dump(logger, message, dump_text, log_dir=None):
-        return
 
 # Default installation directory; overridable via EPISTEIN_INSTALL_DIR env var
 INSTALL_DIR = os.environ.get(
@@ -644,6 +615,84 @@ def ensure_runtime_dependencies(root=None, skip_if_env=True, show_progress_fn=No
     ensure_playwright_browsers()
 
 
+# Helper used by tests to attach a status queue to a GUI-like object.
+# Keeps tests simple and avoids importing heavy GUI components.
+def attach_status_queue(gui):
+    """Attach a simple thread-safe queue to `gui` and return it.
+
+    The queue is stored as `_status_queue` on the `gui` object. Tests may use
+    this to push status messages and verify the queue semantics without running
+    a full Tk mainloop.
+    """
+    import queue
+
+    q = queue.Queue()
+    try:
+        setattr(gui, '_status_queue', q)
+    except Exception:
+        # Best-effort: if the gui object doesn't allow attribute set, return queue anyway
+        pass
+    return q
+
+
+def collect_links_from_page(page, base_url):
+    """Collect all hrefs from a Playwright-like `page` object and return absolute URLs.
+
+    This function is intentionally small and test-focused: it calls
+    `page.query_selector_all('a')` and reads `get_attribute('href')` on each
+    element, joining relative URLs using `base_url`.
+    """
+    import urllib.parse
+
+    links = []
+    try:
+        elems = page.query_selector_all('a')
+    except Exception:
+        elems = []
+    for e in elems:
+        try:
+            href = e.get_attribute('href')
+            if not href:
+                continue
+            href = urllib.parse.urljoin(base_url, href)
+            links.append(href)
+        except Exception:
+            continue
+    return links
+
+
+def discover_file_candidates(hrefs, base_dir):
+    """Return candidate downloadable files from a list of URLs.
+
+    Returns a list of tuples: (url, relative_name, absolute_path).
+    Files without a recognized download extension are skipped.
+    """
+    import os
+    import re
+    import urllib.parse
+
+    allowed_exts = {'.pdf', '.doc', '.docx', '.zip', '.jpg', '.jpeg', '.png', '.tif', '.tiff'}
+    candidates = []
+    for href in hrefs:
+        try:
+            parsed = urllib.parse.urlsplit(href)
+            filename = os.path.basename(parsed.path)
+            if not filename:
+                continue
+            ext = os.path.splitext(filename)[1].lower()
+            if ext not in allowed_exts:
+                continue
+            # Sanitize the filename for use on disk: replace spaces with underscores,
+            # and replace any characters that aren't alphanumeric, dot, underscore, hyphen, or parentheses.
+            rel = filename.replace(' ', '_')
+            rel = re.sub(r"[^\w\.\-\_()]+", '_', rel)
+            full = os.path.join(base_dir, rel)
+            candidates.append((href, rel, full))
+        except Exception:
+            continue
+    return candidates
+
+
 class DownloaderGUI:
     def __init__(self, root):
         self.root = root
@@ -844,22 +893,37 @@ class DownloaderGUI:
                             # If no heartbeat for 3s, treat as unresponsive and write a dump
                             if stagnant >= 3:
                                 try:
-                                    try:
-                                        if _handlers_open(self.logger):
-                                            try:
-                                                self.logger.error("Mainloop unresponsive for %d seconds; capturing thread dump", stagnant)
-                                            except Exception:
-                                                pass
-                                        else:
-                                            try:
-                                                md = getattr(self, 'log_dir', None) or __import__('os').path.join(__import__('os').getcwd(), 'logs')
-                                                __import__('os').makedirs(md, exist_ok=True)
-                                                with open(__import__('os').path.join(md, 'heartbeat_errors.txt'), 'a', encoding='utf-8') as _efh:
-                                                    _efh.write(f"Mainloop unresponsive for {stagnant} seconds; capturing thread dump\n")
-                                            except Exception:
-                                                pass
-                                    except Exception:
-                                        pass
+                                    # If logger handlers are closed (teardown), avoid calling logger.error which can raise
+                                    def _logger_handlers_open():
+                                        try:
+                                            if not hasattr(self, 'logger') or not getattr(self.logger, 'handlers', None):
+                                                return False
+                                            for _h in getattr(self.logger, 'handlers', []):
+                                                s = getattr(_h, 'stream', None)
+                                                try:
+                                                    if s is None:
+                                                        return True
+                                                    if not getattr(s, 'closed', False):
+                                                        return True
+                                                except Exception:
+                                                    return True
+                                            return False
+                                        except Exception:
+                                            return False
+
+                                    if _logger_handlers_open():
+                                        try:
+                                            self.logger.error("Mainloop unresponsive for %d seconds; capturing thread dump", stagnant)
+                                        except Exception:
+                                            pass
+                                    else:
+                                        try:
+                                            md = getattr(self, 'log_dir', None) or __import__('os').path.join(__import__('os').getcwd(), 'logs')
+                                            __import__('os').makedirs(md, exist_ok=True)
+                                            with open(__import__('os').path.join(md, 'heartbeat_errors.txt'), 'a', encoding='utf-8') as _efh:
+                                                _efh.write(f"Mainloop unresponsive for {stagnant} seconds; capturing thread dump\n")
+                                        except Exception:
+                                            pass
                                 except Exception:
                                     pass
                                 try:
@@ -1465,22 +1529,37 @@ class DownloaderGUI:
                     with open(fpath, 'w', encoding='utf-8') as fh:
                         fh.write(dump_text)
                     try:
-                        try:
-                            if _handlers_open(self.logger):
-                                try:
-                                    self.logger.error('Wrote thread dump to file: %s', fpath)
-                                except Exception:
-                                    pass
-                            else:
-                                try:
-                                    logs_dir = getattr(self, 'log_dir', None) or _os.path.join(_os.getcwd(), 'logs')
-                                    _os.makedirs(logs_dir, exist_ok=True)
-                                    with open(_os.path.join(logs_dir, 'heartbeat_errors.txt'), 'a', encoding='utf-8') as _efh:
-                                        _efh.write(f'Wrote thread dump to file: {fpath}\n')
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
+                        # Prefer logging when handlers are available, otherwise fall back to a file write
+                        def _handlers_open():
+                            try:
+                                if not hasattr(self, 'logger') or not getattr(self.logger, 'handlers', None):
+                                    return False
+                                for _h in getattr(self.logger, 'handlers', []):
+                                    s = getattr(_h, 'stream', None)
+                                    try:
+                                        if s is None:
+                                            return True
+                                        if not getattr(s, 'closed', False):
+                                            return True
+                                    except Exception:
+                                        return True
+                                return False
+                            except Exception:
+                                return False
+
+                        if _handlers_open():
+                            try:
+                                self.logger.error('Wrote thread dump to file: %s', fpath)
+                            except Exception:
+                                pass
+                        else:
+                            try:
+                                logs_dir = getattr(self, 'log_dir', None) or _os.path.join(_os.getcwd(), 'logs')
+                                _os.makedirs(logs_dir, exist_ok=True)
+                                with open(_os.path.join(logs_dir, 'heartbeat_errors.txt'), 'a', encoding='utf-8') as _efh:
+                                    _efh.write(f'Wrote thread dump to file: {fpath}\n')
+                            except Exception:
+                                pass
                     except Exception:
                         pass
                 except Exception:
@@ -1496,22 +1575,37 @@ class DownloaderGUI:
                     with open(fpath, 'w', encoding='utf-8') as fh:
                         fh.write(dump_text)
                     try:
-                        try:
-                            if _handlers_open(self.logger):
-                                try:
-                                    self.logger.error('Wrote thread dump to temp file: %s', fpath)
-                                except Exception:
-                                    pass
-                            else:
-                                try:
-                                    logs_dir = getattr(self, 'log_dir', None) or _os.path.join(_os.getcwd(), 'logs')
-                                    _os.makedirs(logs_dir, exist_ok=True)
-                                    with open(_os.path.join(logs_dir, 'heartbeat_errors.txt'), 'a', encoding='utf-8') as _efh:
-                                        _efh.write(f'Wrote thread dump to temp file: {fpath}\n')
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
+                        # Prefer logging when handlers are available, otherwise fall back to a file write
+                        def _handlers_open2():
+                            try:
+                                if not hasattr(self, 'logger') or not getattr(self.logger, 'handlers', None):
+                                    return False
+                                for _h in getattr(self.logger, 'handlers', []):
+                                    s = getattr(_h, 'stream', None)
+                                    try:
+                                        if s is None:
+                                            return True
+                                        if not getattr(s, 'closed', False):
+                                            return True
+                                    except Exception:
+                                        return True
+                                return False
+                            except Exception:
+                                return False
+
+                        if _handlers_open2():
+                            try:
+                                self.logger.error('Wrote thread dump to temp file: %s', fpath)
+                            except Exception:
+                                pass
+                        else:
+                            try:
+                                logs_dir = getattr(self, 'log_dir', None) or _os.path.join(_os.getcwd(), 'logs')
+                                _os.makedirs(logs_dir, exist_ok=True)
+                                with open(_os.path.join(logs_dir, 'heartbeat_errors.txt'), 'a', encoding='utf-8') as _efh:
+                                    _efh.write(f'Wrote thread dump to temp file: {fpath}\n')
+                            except Exception:
+                                pass
                     except Exception:
                         pass
                 except Exception as e:
@@ -2150,12 +2244,8 @@ class DownloaderGUI:
                 except Exception:
                     need_create = True
             if need_create:
-                # Try to create placeholder (delegating to assets helper when available)
-                try:
-                    from assets import create_placeholder_asset
-                    created = create_placeholder_asset(p, name, logger=self.logger)
-                except Exception:
-                    created = self.create_placeholder_asset(p, name)
+                # Try to create placeholder
+                created = self.create_placeholder_asset(p, name)
                 if not created:
                     # Fallback: write minimal PNG to ensure non-empty file for tests and GUI
                     tiny_png = (
@@ -2170,15 +2260,11 @@ class DownloaderGUI:
                             self.logger.warning(f"Failed to write fallback asset {p}")
                         except Exception:
                             pass
-        # Normalize sizes after ensuring presence (delegate to assets helper when available)
+        # Normalize sizes after ensuring presence
         try:
-            from assets import ensure_asset_sizes
-            ensure_asset_sizes(assets_dir, target_px=24, logger=self.logger)
+            self.ensure_asset_sizes(target_px=24)
         except Exception:
-            try:
-                self.ensure_asset_sizes(target_px=24)
-            except Exception:
-                pass
+            pass
 
     def show_toast(self, message, duration=1500):
         """Show a transient non-blocking 'toast' message near the bottom-right of the main window.
@@ -3467,33 +3553,6 @@ class DownloaderGUI:
         except Exception:
             return False
 
-
-# --- Traversal helpers (testable, pure-ish helpers) ---
-def collect_links_from_page(page, base_url):
-    """Collect hrefs from a Playwright-like `page` object and return absolute URLs.
-
-    - page: object exposing `query_selector_all('a')` returning objects with
-      `.get_attribute('href')`.
-    - base_url: used with urllib.parse.urljoin to resolve relative links.
-
-    Returns a list of absolute URLs (strings).
-    """
-    hrefs = []
-    try:
-        links = page.query_selector_all("a")
-    except Exception:
-        return hrefs
-    for link in links:
-        try:
-            href = link.get_attribute("href")
-            if not href:
-                continue
-            abs_url = urllib.parse.urljoin(base_url, href)
-            hrefs.append(abs_url)
-        except Exception:
-            continue
-    return hrefs
-
     # --- Download Logic ---
     def start_download(self):
         self.logger.debug("start_download called.")
@@ -3578,18 +3637,6 @@ def collect_links_from_page(page, base_url):
         )
 
     def download_gdrive_with_fallback(self, url, gdrive_dir, credentials_path):
-        """Download a Google Drive folder with API first, optionally falling back to gdown.
-
-        Parameters
-        - url: the Google Drive folder URL
-        - gdrive_dir: local destination directory
-        - credentials_path: path to service account JSON (optional)
-
-        Behavior:
-        - If credentials are present and API download succeeds, use the Drive API.
-        - If API is not available or fails, and the user requested 'gdown' fallback, attempt gdown.
-        - Provides user-facing prompts via messageboxes and logs actions.
-        """
         import re
 
         try:
@@ -3685,6 +3732,320 @@ def collect_links_from_page(page, base_url):
                 f"Unexpected error in download_gdrive_with_fallback: {e}"
             )
 
+    def _solve_captcha_if_needed(self, page, max_attempts=3):
+        """Detect and solve the Akamai JS challenge CAPTCHA if present.
+
+        Returns True if the page now contains real content, False otherwise.
+        """
+        for attempt in range(max_attempts):
+            try:
+                html = page.content()
+            except Exception:
+                return False
+            if 'not a robot' not in html:
+                return True  # No CAPTCHA, or already solved
+            try:
+                self.logger.info(
+                    f"CAPTCHA detected, solving (attempt {attempt + 1}/{max_attempts})..."
+                )
+            except Exception:
+                pass
+            try:
+                page.click('input.usa-button', timeout=5000)
+                time.sleep(4)
+            except Exception:
+                time.sleep(2)
+        try:
+            return 'not a robot' not in page.content()
+        except Exception:
+            return False
+
+    def _collect_paginated_hrefs(self, base_url, initial_hrefs, playwright_page=None):
+        """Detect ``?page=N`` pagination and collect hrefs from ALL pages.
+
+        Uses HTTP requests to fetch additional paginated pages.  Falls back to
+        Playwright navigation (with CAPTCHA solving) when HTTP requests fail.
+
+        Parameters
+        ----------
+        base_url : str
+            The URL of the page whose links were already collected.
+        initial_hrefs : list[str]
+            Raw ``href`` attribute values collected from the initial page
+            (may be relative or absolute).
+        playwright_page : optional
+            A Playwright ``Page`` object to use as fallback when HTTP requests
+            are blocked (e.g. by Akamai WAF).
+
+        Returns
+        -------
+        (all_hrefs, pagination_urls) : tuple[list[str], set[str]]
+            ``all_hrefs``  – absolute URLs from *all* pages (initial + paginated).
+            ``pagination_urls`` – set of ``?page=N`` URLs to mark as visited so
+            the recursive crawler does not re-visit them.
+        """
+        from html.parser import HTMLParser
+
+        # Resolve initial hrefs and detect highest page number
+        max_page = -1
+        parsed_base = urllib.parse.urlsplit(base_url)
+        base_no_query = urllib.parse.urlunsplit(
+            (parsed_base.scheme, parsed_base.netloc, parsed_base.path, '', '')
+        )
+
+        resolved_initial = []
+        for href in initial_hrefs:
+            abs_url = urllib.parse.urljoin(base_url, href)
+            resolved_initial.append(abs_url)
+            m = re.search(r'[?&]page=(\d+)', abs_url)
+            if m:
+                pn = int(m.group(1))
+                if pn > max_page:
+                    max_page = pn
+
+        if max_page < 1:
+            # No pagination detected – return resolved hrefs unchanged
+            return resolved_initial, set()
+
+        page_label = os.path.basename(parsed_base.path)
+        try:
+            self.logger.info(
+                f"Pagination detected on {page_label}: up to {max_page + 1} pages. "
+                f"Fetching all pages..."
+            )
+        except Exception:
+            pass
+
+        class _HrefExtractor(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.hrefs = []
+
+            def handle_starttag(self, tag, attrs):
+                if tag == 'a':
+                    for name, value in attrs:
+                        if name == 'href' and value:
+                            self.hrefs.append(value)
+
+        all_hrefs = list(resolved_initial)
+        pagination_urls = set()
+        # Mark *all* page variants as pagination URLs (including page 0)
+        for pn in range(0, max_page + 1):
+            pagination_urls.add(f"{base_no_query}?page={pn}")
+
+        # Use a session for cookie persistence (some CDNs set cookies)
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': (
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) '
+                'Chrome/120.0.0.0 Safari/537.36'
+            ),
+            'Accept': (
+                'text/html,application/xhtml+xml,application/xml;q=0.9,'
+                'image/avif,image/webp,image/apng,*/*;q=0.8'
+            ),
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+        })
+
+        # "Warm up" the session by fetching the base page first (sets any
+        # cookies the CDN may require for subsequent paginated requests).
+        try:
+            warm = session.get(base_no_query, timeout=30)
+            warm.raise_for_status()
+        except Exception:
+            pass
+
+        consecutive_failures = 0
+        MAX_CONSECUTIVE_FAILURES = 5
+        REQUEST_DELAY = 1.0  # seconds between page fetches
+
+        page_num = 1
+        while page_num <= max_page:
+            if getattr(self, "_stop_event", None) and self._stop_event.is_set():
+                break
+            while not self._pause_event.is_set():
+                if getattr(self, "_stop_event", None) and self._stop_event.is_set():
+                    break
+                time.sleep(0.1)
+            if getattr(self, "_stop_event", None) and self._stop_event.is_set():
+                break
+
+            page_url = f"{base_no_query}?page={page_num}"
+            try:
+                self.thread_safe_status(
+                    f"Fetching page {page_num + 1}/{max_page + 1} of {page_label}..."
+                )
+            except Exception:
+                pass
+
+            fetched = False
+            page_hrefs = []
+
+            # --- Phase 1: try HTTP requests ---
+            for attempt in range(1, 4):
+                try:
+                    proxies = None
+                    if hasattr(self, 'config') and self.config.get("proxy"):
+                        proxies = {
+                            "http": self.config["proxy"],
+                            "https": self.config["proxy"],
+                        }
+                    session.headers['Referer'] = base_no_query
+                    r = session.get(
+                        page_url, timeout=30, proxies=proxies
+                    )
+                    if r.status_code == 403:
+                        if attempt < 3:
+                            delay = REQUEST_DELAY * attempt * 2
+                            self.logger.warning(
+                                f"HTTP 403 on {page_url} (attempt {attempt}/3), "
+                                f"retrying in {delay:.0f}s..."
+                            )
+                            time.sleep(delay)
+                            continue
+                        raise requests.exceptions.HTTPError(
+                            f"403 Forbidden after {attempt} attempts"
+                        )
+                    r.raise_for_status()
+                    # Check for CAPTCHA in HTML response
+                    if 'not a robot' in r.text:
+                        self.logger.warning(
+                            f"CAPTCHA in HTTP response for {page_url}, "
+                            f"falling back to Playwright..."
+                        )
+                        break
+                    extractor = _HrefExtractor()
+                    extractor.feed(r.text)
+                    for href in extractor.hrefs:
+                        abs_href = urllib.parse.urljoin(page_url, href)
+                        page_hrefs.append(abs_href)
+                    fetched = True
+                    consecutive_failures = 0
+                    break
+                except Exception as e:
+                    if attempt >= 3:
+                        self.logger.warning(
+                            f"HTTP requests failed for {page_url}: {e}"
+                        )
+                    else:
+                        time.sleep(REQUEST_DELAY * attempt)
+
+            # --- Phase 2: Playwright fallback ---
+            if not fetched and playwright_page is not None:
+                try:
+                    self.logger.info(
+                        f"Trying Playwright for {page_url}..."
+                    )
+                    playwright_page.goto(page_url, timeout=30000)
+                    time.sleep(2)
+                    # Solve CAPTCHA if needed
+                    self._solve_captcha_if_needed(playwright_page)
+                    html = playwright_page.content()
+                    if 'Access Denied' not in html:
+                        links = playwright_page.query_selector_all('a')
+                        for link in links:
+                            try:
+                                href = link.get_attribute('href')
+                                if href:
+                                    abs_href = urllib.parse.urljoin(page_url, href)
+                                    page_hrefs.append(abs_href)
+                            except Exception:
+                                continue
+                        fetched = True
+                        consecutive_failures = 0
+                    else:
+                        self.logger.warning(
+                            f"Playwright also got Access Denied for {page_url}"
+                        )
+                except Exception as e:
+                    self.logger.warning(
+                        f"Playwright fallback failed for {page_url}: {e}"
+                    )
+
+            if fetched:
+                page_file_count = 0
+                for href in page_hrefs:
+                    all_hrefs.append(href)
+                    if re.search(
+                        r'\.(pdf|docx?|xlsx?|zip|txt|jpg|png|csv|mp4|mov|avi|wmv|wav|mp3|m4a)$',
+                        href,
+                        re.IGNORECASE,
+                    ):
+                        page_file_count += 1
+                try:
+                    self.logger.info(
+                        f"Page {page_num + 1}/{max_page + 1} of {page_label}: "
+                        f"{page_file_count} file links"
+                    )
+                except Exception:
+                    pass
+                # Detect if this page reveals more pages
+                for href in page_hrefs:
+                    m = re.search(r'[?&]page=(\d+)', href)
+                    if m:
+                        discovered = int(m.group(1))
+                        if discovered > max_page:
+                            max_page = discovered
+                            pagination_urls.add(
+                                f"{base_no_query}?page={discovered}"
+                            )
+            else:
+                consecutive_failures += 1
+                try:
+                    self.logger.warning(
+                        f"Could not fetch page {page_num + 1}/{max_page + 1} "
+                        f"of {page_label} (failure #{consecutive_failures})"
+                    )
+                except Exception:
+                    pass
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                    self.logger.error(
+                        f"Aborting pagination for {page_label} after "
+                        f"{MAX_CONSECUTIVE_FAILURES} consecutive failures. "
+                        f"Collected pages 1-{page_num} of {max_page + 1}. "
+                        f"The site may be rate-limiting requests — try again later."
+                    )
+                    break
+
+            page_num += 1
+            # Small delay between requests to avoid rate-limiting
+            if page_num <= max_page:
+                time.sleep(REQUEST_DELAY)
+
+        # Deduplicate while preserving order
+        seen = set()
+        unique = []
+        for href in all_hrefs:
+            if href not in seen:
+                seen.add(href)
+                unique.append(href)
+
+        try:
+            total_files = sum(
+                1 for h in unique
+                if re.search(
+                    r'\.(pdf|docx?|xlsx?|zip|txt|jpg|png|csv|mp4|mov|avi|wmv|wav|mp3|m4a)$',
+                    h,
+                    re.IGNORECASE,
+                )
+            )
+            self.logger.info(
+                f"Pagination complete for {page_label}: "
+                f"{total_files} total file links across {max_page + 1} pages"
+            )
+        except Exception:
+            pass
+
+        return unique, pagination_urls
+
     def download_files_threaded(
         self,
         page,
@@ -3695,15 +4056,6 @@ def collect_links_from_page(page, base_url):
         file_tree=None,
         all_files=None,
     ):
-        """Thread-aware download traversal and file fetcher.
-
-        This routine traverses `base_url` using a Playwright `page` object, collects file
-        links, and performs threaded downloads of files found on the page. It is similar
-        to `download_files` but tailored for multi-threaded downloads and cooperative
-        pause/stop behavior via `self._pause_event` and `self._stop_event`.
-
-        Returns a tuple (skipped_files_set, file_tree_dict, all_files_set).
-        """
         allowed_domains = [
             "https://www.justice.gov/epstein",
             "https://oversight.house.gov/release/oversight-committee-releases-epstein-records-provided-by-the-department-of-justice/",
@@ -3742,6 +4094,8 @@ def collect_links_from_page(page, base_url):
         except Exception as e:
             self.logger.error(f"Error loading {base_url}: {e}\nContinuing...")
             return skipped_files, file_tree, all_files
+        # Solve Akamai CAPTCHA challenge if the page shows one
+        self._solve_captcha_if_needed(page)
         links = page.query_selector_all("a")
         self.logger.info(f"Found {len(links)} links on {base_url}")
         hrefs = []
@@ -3760,6 +4114,21 @@ def collect_links_from_page(page, base_url):
                     hrefs.append(href)
             except Exception as e:
                 self.logger.error(f"Error reading link attribute: {e}")
+
+        # --- Pagination handling ---
+        # Detect ?page=N pagination and collect file links from ALL pages
+        # using HTTP requests (faster and more reliable than Playwright recursion).
+        try:
+            hrefs, pagination_urls = self._collect_paginated_hrefs(
+                base_url, hrefs, playwright_page=page
+            )
+            if pagination_urls:
+                visited.update(pagination_urls)
+                self.logger.info(
+                    f"Marked {len(pagination_urls)} pagination URLs as visited for {base_url}"
+                )
+        except Exception as e:
+            self.logger.error(f"Pagination collection failed for {base_url}: {e}")
 
         download_args = []
         num_threads = 6
@@ -5379,17 +5748,6 @@ def collect_links_from_page(page, base_url):
         )
 
     def download_gdrive_folder(self, folder_url, output_dir):
-        """Download a Google Drive folder using `gdown.download_folder`.
-
-        This helper is used when the API-based `download_drive_folder_api` cannot be
-        used (e.g., missing credentials) and the user opted into the gdown fallback.
-
-        Parameters:
-        - folder_url: Google Drive folder URL
-        - output_dir: local directory to place downloaded files
-
-        Returns a list of tuples (relative_path, dest_path) for downloaded files.
-        """
         import gdown
         import logging
 
@@ -6041,15 +6399,6 @@ def collect_links_from_page(page, base_url):
         file_tree=None,
         all_files=None,
     ):
-        """Synchronous download traversal for Playwright `page`.
-
-        Walks links discovered on `base_url`, records candidate files in `file_tree` and
-        `all_files`, and performs synchronous downloads (used by `download_all` and
-        `process_download_queue`). Uses cooperative pause/stop via `self._pause_event`
-        and `self._stop_event`.
-
-        Returns a tuple (skipped_files_set, file_tree_dict, all_files_set).
-        """
 
         allowed_domains = [
             "https://www.justice.gov/epstein",
@@ -6079,6 +6428,8 @@ def collect_links_from_page(page, base_url):
         except Exception as e:
             print(f"Error loading {base_url}: {e}\nContinuing...")
             return skipped_files, file_tree, all_files
+        # Solve Akamai CAPTCHA challenge if the page shows one
+        self._solve_captcha_if_needed(page)
         links = page.query_selector_all("a")
         self.thread_safe_status(f"Found {len(links)} links on {base_url}")
         hrefs = []
@@ -6098,6 +6449,21 @@ def collect_links_from_page(page, base_url):
                     hrefs.append(href)
             except Exception as e:
                 print(f"Error reading link attribute: {e}")
+
+        # --- Pagination handling ---
+        # Detect ?page=N pagination and collect file links from ALL pages
+        # using HTTP requests (faster and more reliable than Playwright recursion).
+        try:
+            hrefs, pagination_urls = self._collect_paginated_hrefs(
+                base_url, hrefs, playwright_page=page
+            )
+            if pagination_urls:
+                visited.update(pagination_urls)
+                self.logger.info(
+                    f"Marked {len(pagination_urls)} pagination URLs as visited for {base_url}"
+                )
+        except Exception as e:
+            self.logger.error(f"Pagination collection failed for {base_url}: {e}")
 
         # Prepare download tasks
         download_info = []  # (abs_url, local_path, folder)
@@ -6437,12 +6803,6 @@ def _compat_pick_credentials_file(self):
 
 
 def _compat_import_settings(self):
-    """Compatibility wrapper for importing settings from a file.
-
-    This stub provides a minimal import flow so older tests or UIs that call
-    `import_settings` will behave in a predictable way even if a more
-    feature-rich implementation is not present.
-    """
     # Simple wrapper that calls the (possibly existing) import logic if present.
     try:
         # If a robust implementation exists elsewhere as a function, call it; otherwise prompt for a file and perform a basic import
@@ -6495,13 +6855,6 @@ for name, fn in [
 # Provide a minimal implementation for download_drive_folder_api if missing
 if not hasattr(DownloaderGUI, 'download_drive_folder_api'):
     def _compat_download_drive_folder_api(self, folder_id, gdrive_dir, credentials_path=None):
-        """Compatibility shim for Drive API folder download.
-
-        Provide a minimal behavior that attempts to list files for the supplied
-        `folder_id` using the Drive API client. Used primarily to make tests that
-        expect this method to exist pass when `googleapiclient` may not be installed
-        or when full behavior is provided elsewhere.
-        """
         try:
             from googleapiclient.discovery import build
         except Exception:
@@ -6539,12 +6892,6 @@ if not hasattr(DownloaderGUI, 'download_drive_folder_api'):
 
 # Hotfix: fallback create_widgets (temporary)
 def _create_widgets_fallback(self):
-    """Minimal create_widgets fallback to provide a usable UI surface.
-
-    This fallback is only used when the main `create_widgets` is missing or
-    fails; it provides a small, testable subset of the UI so automated tests
-    that assert presence of basic controls can proceed.
-    """
     try:
         self.logger.info("fallback create_widgets: start")
     except Exception:
@@ -6694,18 +7041,148 @@ def main():
     try:
         def _dump_thread_stacks(reason=""):
             try:
-                logger = logging.getLogger("EpsteinFilesDownloader")
-                dump_text = capture_thread_dump(reason)
-                # Safe logging/write with file fallback
+                import sys as _sys, logging as _logging, linecache as _linecache, threading as _threading, os as _os, time as _time
+                logger = _logging.getLogger("EpsteinFilesDownloader")
+                header = f"--- THREAD DUMP ({reason}) ---"
                 try:
-                    safe_log_dump(logger, f"--- THREAD DUMP ({reason}) ---", dump_text, log_dir=None)
+                    def _handlers_open():
+                        try:
+                            if not getattr(logger, 'handlers', None):
+                                return False
+                            for _h in getattr(logger, 'handlers', []):
+                                s = getattr(_h, 'stream', None)
+                                try:
+                                    if s is None:
+                                        return True
+                                    if not getattr(s, 'closed', False):
+                                        return True
+                                except Exception:
+                                    return True
+                            return False
+                        except Exception:
+                            return False
+
+                    if _handlers_open():
+                        try:
+                            logger.error(header)
+                        except Exception:
+                            pass
+                    else:
+                        # Fallback: write a small marker to logs directory directly
+                        try:
+                            logs_dir = getattr(sys.modules.get('epstein_downloader_gui', None), 'log_dir', None) or os.path.join(os.getcwd(), 'logs')
+                            os.makedirs(logs_dir, exist_ok=True)
+                            with open(os.path.join(logs_dir, 'heartbeat_errors.txt'), 'a', encoding='utf-8') as _efh:
+                                _efh.write(header + '\n')
+                        except Exception:
+                            pass
+                except Exception:
+                    # Logging/disk IO may be unavailable during shutdown; ignore
+                    pass
+
+                frames = _sys._current_frames()
+                try:
+                    thread_name_by_id = {t.ident: t.name for t in _threading.enumerate()}
+                except Exception:
+                    thread_name_by_id = {}
+
+                output_lines = [header]
+                for tid, frame in frames.items():
+                    try:
+                        tname = thread_name_by_id.get(tid, str(tid))
+                        output_lines.append(f"Thread {tname} (id={tid}) stack:")
+                        # Walk the frame chain safely and collect best-effort lines
+                        f = frame
+                        while f is not None:
+                            try:
+                                co = f.f_code
+                                filename = co.co_filename
+                                lineno = f.f_lineno
+                                func = co.co_name
+                                src = _linecache.getline(filename, lineno).strip()
+                                output_lines.append(f'  File "{filename}", line {lineno}, in {func}')
+                                output_lines.append(f'    {src}')
+                            except Exception:
+                                output_lines.append('  <frame formatting failed>')
+                            try:
+                                f = f.f_back
+                            except Exception:
+                                break
+                    except Exception:
+                        try:
+                            logger.exception("Failed to format thread %s stack", tid)
+                        except Exception:
+                            pass
+
+                output_lines.append("--- END THREAD DUMP ---")
+                dump_text = "\n".join(output_lines)
+                try:
+                    # Prefer logging when available; otherwise write dump to a temp file directly
+                    def _handlers_open2():
+                        try:
+                            if not getattr(logger, 'handlers', None):
+                                return False
+                            for _h in getattr(logger, 'handlers', []):
+                                s = getattr(_h, 'stream', None)
+                                try:
+                                    if s is None:
+                                        return True
+                                    if not getattr(s, 'closed', False):
+                                        return True
+                                except Exception:
+                                    return True
+                            return False
+                        except Exception:
+                            return False
+
+                    if _handlers_open2():
+                        try:
+                            logger.error(dump_text)
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            import tempfile as _tempfile
+                            td = _tempfile.gettempdir()
+                            fpath = os.path.join(td, f"thread_dump_{reason}_{int(time.time())}_{os.getpid()}.txt")
+                            with open(fpath, 'w', encoding='utf-8') as fh:
+                                fh.write(dump_text)
+                        except Exception:
+                            try:
+                                print('THREAD DUMP (fallback):')
+                                print(dump_text)
+                            except Exception:
+                                pass
                 except Exception:
                     pass
-            except Exception:
+
+                # Best-effort: log the dump
                 try:
-                    logging.getLogger("EpsteinFilesDownloader").exception("Failed to produce thread dump")
+                    logger.error(dump_text)
                 except Exception:
                     pass
+
+                # File-based fallback: write a raw dump to disk using direct I/O so we have a persistent copy even under logging shutdown
+                try:
+                    logs_dir = None
+                    # Prefer known log locations if available
+                    candidate_dirs = [
+                        getattr(__import__('os'), 'getcwd')(),
+                        _os.path.join(getattr(__import__('os'), 'getcwd')(), 'logs'),
+                        _os.path.join(_os.path.expanduser('~'), 'AppData', 'Local', 'EpsteinFilesDownloader', 'logs') if _os.name == 'nt' else None,
+                    ]
+                    for d in candidate_dirs:
+                        if not d:
+                            continue
+                        try:
+                            _os.makedirs(d, exist_ok=True)
+                            logs_dir = d
+                            break
+                        except Exception:
+                            continue
+                    if not logs_dir:
+                        logs_dir = _os.getcwd()
+                    ts = _time.strftime('%Y%m%d_%H%M%S')
                     pid = _os.getpid()
                     fname = f"thread_dump_{ts}_{pid}.txt"
                     fpath = _os.path.join(logs_dir, fname)
@@ -6759,7 +7236,17 @@ def main():
 
         try:
             import atexit as _atexit
-            _atexit.register(lambda: _dump_thread_stacks('atexit'))
+            # Only register the atexit thread dump when not in headless/CI mode.
+            # Headless CI tests set EPSTEIN_HEADLESS=1 and expect a clean, quiet exit.
+            try:
+                if __import__('os').environ.get('EPSTEIN_HEADLESS', '0') != '1':
+                    _atexit.register(lambda: _dump_thread_stacks('atexit'))
+            except Exception:
+                # If env check fails for any reason, fall back to registering the handler
+                try:
+                    _atexit.register(lambda: _dump_thread_stacks('atexit'))
+                except Exception:
+                    pass
         except Exception:
             pass
     except Exception:
@@ -6914,6 +7401,26 @@ def main():
         logging.getLogger("EpsteinFilesDownloader").info(
             "Headless initialization complete."
         )
+        # Ensure background monitors (e.g. heartbeat) are signalled to stop to avoid
+        # thread dumps at process exit when running headless in CI.
+        try:
+            if '_app' in locals() and hasattr(_app, '_heartbeat_stop_event'):
+                try:
+                    _app._heartbeat_stop_event.set()
+                except Exception:
+                    pass
+                try:
+                    t = getattr(_app, '_heartbeat_thread', None)
+                    if t is not None:
+                        try:
+                            if getattr(t, 'is_alive', lambda: False)():
+                                t.join(timeout=1.0)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
         try:
             root.destroy()
         except Exception:

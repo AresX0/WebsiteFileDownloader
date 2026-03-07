@@ -1,0 +1,110 @@
+<Window x:Class="WebsiteDownloader.UI.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Settings" Width="550" Height="520" WindowStartupLocation="CenterOwner"
+        Background="{StaticResource SurfaceBrush}" ResizeMode="NoResize">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TabControl Grid.Row="0" Background="{StaticResource SurfaceLightBrush}"
+                    Foreground="{StaticResource TextPrimaryBrush}">
+
+            <!-- General Tab -->
+            <TabItem Header="General">
+                <StackPanel Margin="16">
+                    <TextBlock Text="Download Folder:" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,4"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="OutputDirBox" Grid.Column="0" Padding="6,4" Margin="0,0,8,0"/>
+                        <Button Grid.Column="1" Content="Browse..." Click="OnBrowseOutputDir" Style="{StaticResource SecondaryButton}" MinWidth="80"/>
+                    </Grid>
+
+                    <TextBlock Text="Log Folder:" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,12,0,4"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="LogDirBox" Grid.Column="0" Padding="6,4" Margin="0,0,8,0"/>
+                        <Button Grid.Column="1" Content="Browse..." Click="OnBrowseLogDir" Style="{StaticResource SecondaryButton}" MinWidth="80"/>
+                    </Grid>
+
+                    <TextBlock Text="Concurrent Downloads (1-32):" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,12,0,4"/>
+                    <TextBox x:Name="ConcurrentBox" Width="80" HorizontalAlignment="Left" Padding="6,4"/>
+
+                    <CheckBox x:Name="AutoStartCheck" Content=" Auto-start downloads on launch" Margin="0,14,0,0"
+                              Foreground="{StaticResource TextPrimaryBrush}"/>
+                    <CheckBox x:Name="StartMinimizedCheck" Content=" Start minimized" Margin="0,8,0,0"
+                              Foreground="{StaticResource TextPrimaryBrush}"/>
+                    <CheckBox x:Name="MirrorDirsCheck" Content=" Mirror URL directory structure" Margin="0,8,0,0"
+                              Foreground="{StaticResource TextPrimaryBrush}" ToolTip="Create subdirectories matching the website URL path"/>
+                </StackPanel>
+            </TabItem>
+
+            <!-- Network Tab -->
+            <TabItem Header="Network">
+                <StackPanel Margin="16">
+                    <TextBlock Text="HTTP Proxy (e.g., http://user:pass@host:port):" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,4"/>
+                    <TextBox x:Name="ProxyBox" Padding="6,4"/>
+
+                    <TextBlock Text="Speed Limit (KB/s, 0 = unlimited):" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,16,0,4"/>
+                    <TextBox x:Name="SpeedLimitBox" Width="100" HorizontalAlignment="Left" Padding="6,4"/>
+
+                    <TextBlock Text="Request Delay (ms):" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,16,0,4"/>
+                    <TextBox x:Name="RequestDelayBox" Width="100" HorizontalAlignment="Left" Padding="6,4"/>
+                </StackPanel>
+            </TabItem>
+
+            <!-- Appearance Tab -->
+            <TabItem Header="Appearance">
+                <StackPanel Margin="16">
+                    <TextBlock Text="Theme:" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,4"/>
+                    <ComboBox x:Name="ThemeCombo" Width="200" HorizontalAlignment="Left">
+                        <ComboBoxItem Content="Dark"/>
+                        <ComboBoxItem Content="Light"/>
+                    </ComboBox>
+                </StackPanel>
+            </TabItem>
+
+            <!-- Advanced Tab -->
+            <TabItem Header="Advanced">
+                <StackPanel Margin="16">
+                    <TextBlock Text="Google Drive Credentials File:" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,4"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="CredentialsBox" Grid.Column="0" Padding="6,4" Margin="0,0,8,0"/>
+                        <Button Grid.Column="1" Content="Browse..." Click="OnBrowseCredentials" Style="{StaticResource SecondaryButton}" MinWidth="80"/>
+                    </Grid>
+
+                    <CheckBox x:Name="GdownFallbackCheck" Content=" Enable gdown fallback for Google Drive" Margin="0,14,0,0"
+                              Foreground="{StaticResource TextPrimaryBrush}"/>
+                    <CheckBox x:Name="SkipDuplicatesCheck" Content=" Skip duplicate files (SHA-256)" Margin="0,8,0,0"
+                              Foreground="{StaticResource TextPrimaryBrush}"/>
+
+                    <Separator Margin="0,16,0,16"/>
+
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Export Settings..." Click="OnExportSettings" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" MinWidth="120"/>
+                        <Button Content="Import Settings..." Click="OnImportSettings" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" MinWidth="120"/>
+                        <Button Content="Restore Defaults" Click="OnRestoreDefaults" Style="{StaticResource DangerButton}" MinWidth="120"/>
+                    </StackPanel>
+                </StackPanel>
+            </TabItem>
+        </TabControl>
+
+        <!-- Bottom Buttons -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Save" Click="OnSave" Style="{StaticResource PrimaryButton}" MinWidth="90" Margin="0,0,8,0"/>
+            <Button Content="Cancel" Click="OnCancel" Style="{StaticResource SecondaryButton}" MinWidth="90"/>
+        </StackPanel>
+    </Grid>
+</Window>

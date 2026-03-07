@@ -31,9 +31,25 @@ def test_collect_links_basic(tmp_path, monkeypatch):
     # Should join relative and return full URLs; here links are absolute already
     assert abs_links == hrefs
 
-@pytest.mark.skip(reason="Needs implementation of collect_links_from_page and other helpers")
-def test_discover_file_candidates():
-    pass
+def test_discover_file_candidates(tmp_path):
+    from epstein_downloader_gui import discover_file_candidates
+    hrefs = [
+        'https://example.com/files/report.pdf',
+        'https://example.com/docs/notes (final).docx',
+        'https://example.com/images/photo.jpg',
+        'https://example.com/skip/page.html',
+    ]
+    base_dir = str(tmp_path / 'downloads')
+    cands = discover_file_candidates(hrefs, base_dir)
+    # Expect three candidates (skip the .html)
+    assert len(cands) == 3
+    # Sanitize check for the one with parentheses
+    matches = [rel for (_u, rel, _p) in cands]
+    assert any('notes (final).docx'.replace(' ', '_') in r.replace(' ', '_') or 'notes_final.docx' in r for r in matches)
+    # Local paths should start with base_dir
+    for (_u, rel, p) in cands:
+        assert p.startswith(base_dir)
+
 
 @pytest.mark.skip(reason="Integration tests for download concurrency to be implemented")
 def test_download_files_concurrent():

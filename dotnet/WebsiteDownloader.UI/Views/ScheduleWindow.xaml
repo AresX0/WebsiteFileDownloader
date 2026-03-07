@@ -1,0 +1,52 @@
+<Window x:Class="WebsiteDownloader.UI.Views.ScheduleWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Download Schedule" Width="400" Height="340" WindowStartupLocation="CenterOwner"
+        Background="{StaticResource SurfaceBrush}" ResizeMode="NoResize">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Schedule recurring downloads" FontSize="16" FontWeight="Bold"
+                   Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,12"/>
+
+        <!-- Days -->
+        <GroupBox Grid.Row="1" Header="Days" Foreground="{StaticResource TextSecondaryBrush}" 
+                  Padding="8" Margin="0,0,0,12">
+            <WrapPanel>
+                <CheckBox x:Name="MonCheck" Content=" Mon" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,12,4"/>
+                <CheckBox x:Name="TueCheck" Content=" Tue" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,12,4"/>
+                <CheckBox x:Name="WedCheck" Content=" Wed" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,12,4"/>
+                <CheckBox x:Name="ThuCheck" Content=" Thu" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,12,4"/>
+                <CheckBox x:Name="FriCheck" Content=" Fri" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,12,4"/>
+                <CheckBox x:Name="SatCheck" Content=" Sat" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,12,4"/>
+                <CheckBox x:Name="SunCheck" Content=" Sun" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,12,4"/>
+            </WrapPanel>
+        </GroupBox>
+
+        <!-- Time -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,12">
+            <TextBlock Text="Time:" VerticalAlignment="Center" Margin="0,0,8,0"
+                       Foreground="{StaticResource TextSecondaryBrush}" FontWeight="SemiBold"/>
+            <TextBox x:Name="HourBox" Width="45" Padding="4,2" VerticalContentAlignment="Center" Text="02" MaxLength="2"/>
+            <TextBlock Text=" : " VerticalAlignment="Center" Foreground="{StaticResource TextPrimaryBrush}" FontSize="16"/>
+            <TextBox x:Name="MinuteBox" Width="45" Padding="4,2" VerticalContentAlignment="Center" Text="00" MaxLength="2"/>
+        </StackPanel>
+
+        <!-- Status -->
+        <TextBlock Grid.Row="3" x:Name="StatusText" Foreground="{StaticResource TextSecondaryBrush}"
+                   VerticalAlignment="Top" TextWrapping="Wrap"/>
+
+        <!-- Buttons -->
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Set Schedule" Click="OnSetSchedule" Style="{StaticResource PrimaryButton}" MinWidth="110" Margin="0,0,8,0"/>
+            <Button Content="Clear Schedule" Click="OnClearSchedule" Style="{StaticResource DangerButton}" MinWidth="110" Margin="0,0,8,0"/>
+            <Button Content="Close" Click="OnClose" Style="{StaticResource SecondaryButton}" MinWidth="80"/>
+        </StackPanel>
+    </Grid>
+</Window>

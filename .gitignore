@@ -42,3 +42,11 @@ mainloop_unresponsive_marker.txt
 epstein_downloader_gui.py.backup*
 *.bak
 tools/collected_logs/
+
+# .NET
+dotnet/**/bin/
+dotnet/**/obj/
+dotnet/publish/
+dotnet/.vs/
+*.user
+_platypus_dirs.txt
