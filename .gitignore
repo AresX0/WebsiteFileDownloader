@@ -53,3 +53,5 @@ _platypus_dirs.txt
 dotnet/installer/output/
 dotnet/installer/WebsiteDownloader.wxs
 dotnet/installer/License.rtf
+.wix/
+.wix/
