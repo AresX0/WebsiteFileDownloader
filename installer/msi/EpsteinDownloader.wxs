@@ -5,7 +5,7 @@
            Manufacturer="AresX0"
            Version="2.1.1"
            UpgradeCode="8E2F4A1B-3C5D-4E6F-A7B8-9C0D1E2F3A4B"
-           Scope="perUser"
+           Scope="perMachine"
            InstallerVersion="500">
 
     <!-- Upgrade: removes any older version with the same UpgradeCode before installing -->
@@ -14,10 +14,12 @@
 
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
-    <!-- Install into %LOCALAPPDATA%\EpsteinFilesDownloader -->
-    <StandardDirectory Id="LocalAppDataFolder">
-      <Directory Id="INSTALLFOLDER" Name="EpsteinFilesDownloader">
-        <Directory Id="AssetsFolder" Name="assets" />
+    <!-- Install into Program Files\EpsteinFilesDownloader -->
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="CompanyFolder" Name="PlatypusFiles">
+        <Directory Id="INSTALLFOLDER" Name="EpsteinFilesDownloader">
+          <Directory Id="AssetsFolder" Name="assets" />
+        </Directory>
       </Directory>
     </StandardDirectory>
 
@@ -59,7 +61,7 @@
                   WorkingDirectory="INSTALLFOLDER"
                   Icon="AppIcon" />
         <RemoveFolder Id="RemoveProgramMenuDir" On="uninstall" />
-        <RegistryValue Root="HKCU" Key="Software\AresX0\EpsteinFilesDownloader"
+        <RegistryValue Root="HKLM" Key="Software\AresX0\EpsteinFilesDownloader"
                        Name="installed" Type="integer" Value="1" KeyPath="yes" />
       </Component>
       <Component Id="DesktopShortcut" Directory="DesktopFolder" Guid="*">
@@ -68,7 +70,7 @@
                   Target="[INSTALLFOLDER]EpsteinDownloader.exe"
                   WorkingDirectory="INSTALLFOLDER"
                   Icon="AppIcon" />
-        <RegistryValue Root="HKCU" Key="Software\AresX0\EpsteinFilesDownloader"
+        <RegistryValue Root="HKLM" Key="Software\AresX0\EpsteinFilesDownloader"
                        Name="desktop_shortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </ComponentGroup>
