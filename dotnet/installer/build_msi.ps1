@@ -27,6 +27,14 @@ dotnet publish WebsiteDownloader.UI -c $Configuration -r win-x64 --self-containe
 if ($LASTEXITCODE -ne 0) { throw "Publish failed" }
 Pop-Location
 
+# Ensure logo.ico is in publish dir for WiX Icon element
+$logoSrc = Join-Path $dotnetDir "WebsiteDownloader.UI\logo.ico"
+$logoDst = Join-Path $publishDir "logo.ico"
+if ((Test-Path $logoSrc) -and -not (Test-Path $logoDst)) {
+    Copy-Item $logoSrc $logoDst -Force
+    Write-Host "  Copied logo.ico to publish dir"
+}
+
 # Step 2: Generate file harvest
 Write-Host "`n[2/4] Harvesting files..." -ForegroundColor Yellow
 $files = Get-ChildItem $publishDir -Recurse -File
@@ -87,7 +95,7 @@ $wxsContent = @'
            Manufacturer="AresX0"
            Version="VERSION_PLACEHOLDER"
            UpgradeCode="8E2F4A1B-3C5D-4E6F-A7B8-9C0D1E2F3A4B"
-           Scope="perUser"
+           Scope="perMachine"
            InstallerVersion="500">
 
     <MajorUpgrade DowngradeErrorMessage="A newer version of Website File Downloader is already installed." />
@@ -96,9 +104,11 @@ $wxsContent = @'
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
     <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseFile)" />
 
-    <StandardDirectory Id="LocalAppDataFolder">
-      <Directory Id="INSTALLFOLDER" Name="WebsiteFileDownloader">
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="CompanyFolder" Name="PlatypusFiles">
+        <Directory Id="INSTALLFOLDER" Name="WebsiteFileDownloader">
 DIRS_PLACEHOLDER
+        </Directory>
       </Directory>
     </StandardDirectory>
 
@@ -116,9 +126,10 @@ COMPREFS_PLACEHOLDER
         <Shortcut Id="ApplicationStartMenuShortcut"
                   Name="Website File Downloader"
                   Target="[INSTALLFOLDER]WebsiteDownloader.UI.exe"
-                  WorkingDirectory="INSTALLFOLDER" />
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon" />
         <RemoveFolder Id="RemoveProgramMenuDir" On="uninstall" />
-        <RegistryValue Root="HKCU" Key="Software\AresX0\WebsiteFileDownloader" 
+        <RegistryValue Root="HKLM" Key="Software\AresX0\WebsiteFileDownloader" 
                        Name="installed" Type="integer" Value="1" KeyPath="yes" />
       </Component>
 
@@ -126,8 +137,9 @@ COMPREFS_PLACEHOLDER
         <Shortcut Id="ApplicationDesktopShortcut"
                   Name="Website File Downloader"
                   Target="[INSTALLFOLDER]WebsiteDownloader.UI.exe"
-                  WorkingDirectory="INSTALLFOLDER" />
-        <RegistryValue Root="HKCU" Key="Software\AresX0\WebsiteFileDownloader"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon" />
+        <RegistryValue Root="HKLM" Key="Software\AresX0\WebsiteFileDownloader"
                        Name="desktop_shortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </ComponentGroup>
@@ -135,6 +147,8 @@ COMPREFS_PLACEHOLDER
     <Feature Id="ShortcutFeature" Title="Shortcuts" Level="1">
       <ComponentGroupRef Id="Shortcuts" />
     </Feature>
+
+    <Icon Id="AppIcon" SourceFile="$(var.PublishDir)\logo.ico" />
 
   </Package>
 
@@ -177,6 +191,7 @@ $msiPath = Join-Path $outputDir "WebsiteFileDownloader-$Version-win-x64.msi"
 wix build $wxsPath `
     -ext WixToolset.UI.wixext `
     -d "LicenseFile=$licenseRtf" `
+    -d "PublishDir=$publishDir" `
     -o $msiPath `
     2>&1
 

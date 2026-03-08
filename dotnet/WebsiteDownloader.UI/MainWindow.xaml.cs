@@ -191,7 +191,7 @@ public partial class MainWindow : Window
     private void OnAboutClick(object sender, RoutedEventArgs e)
     {
         var result = MessageBox.Show(
-            "Website File Downloader v2.0\n\n" +
+            $"Website File Downloader v{UpdateChecker.CurrentVersion}\n\n" +
             "A generic website file downloader with pagination,\n" +
             "SHA-256 dedup, proxy support, scheduling,\n" +
             "and Google Drive integration.\n\n" +
@@ -219,14 +219,52 @@ public partial class MainWindow : Window
         if (newVersion != null)
         {
             var result = MessageBox.Show(
-                $"A new version ({newVersion}) is available. Open releases page?",
+                $"A new version ({newVersion}) is available.\nYou are running: {UpdateChecker.CurrentVersion}\n\nDownload and install the update now?",
                 "Update Available", MessageBoxButton.YesNo, MessageBoxImage.Information);
-            if (result == MessageBoxResult.Yes)
-                UpdateChecker.OpenReleasesPage();
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            // Try to find and download the installer asset
+            var asset = await UpdateChecker.GetInstallerAssetAsync();
+            if (asset == null)
+            {
+                // Fallback: open releases page
+                var fallback = MessageBox.Show(
+                    "Could not find an installer in the latest release.\nOpen the releases page to download manually?",
+                    "Update", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                if (fallback == MessageBoxResult.Yes)
+                    UpdateChecker.OpenReleasesPage();
+                return;
+            }
+
+            try
+            {
+                // Simple progress via title bar
+                var origTitle = Title;
+                Title = $"Downloading update: {asset.Value.FileName}...";
+                var progress = new Progress<double>(pct =>
+                    Dispatcher.Invoke(() => Title = $"Downloading update: {pct:F0}%"));
+
+                var installerPath = await UpdateChecker.DownloadInstallerAsync(
+                    asset.Value.Url, asset.Value.FileName, progress);
+
+                Title = "Launching installer...";
+                UpdateChecker.LaunchInstaller(installerPath);
+
+                // Shut down so the installer can overwrite files
+                await Task.Delay(1500);
+                Application.Current.Shutdown();
+            }
+            catch (Exception ex)
+            {
+                Title = "Website File Downloader";
+                MessageBox.Show($"Update failed:\n{ex.Message}", "Update Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
         else
         {
-            MessageBox.Show("You are running the latest version.", "Up to Date",
+            MessageBox.Show($"You are running the latest version ({UpdateChecker.CurrentVersion}).", "Up to Date",
                 MessageBoxButton.OK, MessageBoxImage.Information);
         }
     }

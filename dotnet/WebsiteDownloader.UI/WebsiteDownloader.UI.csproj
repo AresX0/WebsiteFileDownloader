@@ -6,9 +6,14 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>WebsiteDownloader.UI</RootNamespace>
-    <Version>1.0.0.0</Version>
+    <Version>2.1.1</Version>
+    <ApplicationIcon>logo.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\WebsiteDownloader.Core\WebsiteDownloader.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="logo.png" />
+    <Content Include="logo.ico" />
   </ItemGroup>
 </Project>

@@ -63,6 +63,15 @@
                 <Setter Property="Background" Value="{DynamicResource SurfaceLightBrush}"/>
                 <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
             </Style>
+
+            <!-- Menu styling: ensure dark text on light backgrounds -->
+            <Style TargetType="Menu">
+                <Setter Property="Background" Value="{DynamicResource SurfaceLightBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+            </Style>
+            <Style TargetType="MenuItem">
+                <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

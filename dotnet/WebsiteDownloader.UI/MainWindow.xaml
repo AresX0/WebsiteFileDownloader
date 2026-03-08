@@ -5,6 +5,7 @@
         Title="Website File Downloader" 
         Height="850" Width="1200" MinWidth="900" MinHeight="650"
         WindowStartupLocation="CenterScreen"
+        Icon="logo.ico"
         Background="{DynamicResource SurfaceBrush}"
         AllowDrop="True" Drop="OnDrop" DragOver="OnDragOver"
         Closing="OnWindowClosing"
@@ -70,16 +71,19 @@
                         <Grid Grid.Row="0" Margin="0,0,0,10">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="250"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="Website File Downloader" 
+                            <Image Grid.Column="0" Source="logo.png" Width="48" Height="48" 
+                                   Margin="0,0,12,0" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"/>
+                            <TextBlock Grid.Column="1" Text="Website File Downloader" 
                                        FontSize="22" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}"
                                        VerticalAlignment="Center"/>
-                            <TextBlock Grid.Column="2" Text="Profile:" VerticalAlignment="Center" Margin="0,0,8,0"
+                            <TextBlock Grid.Column="3" Text="Profile:" VerticalAlignment="Center" Margin="0,0,8,0"
                                        Foreground="{DynamicResource TextSecondaryBrush}"/>
-                            <ComboBox Grid.Column="3" ItemsSource="{Binding Profiles}" 
+                            <ComboBox Grid.Column="4" ItemsSource="{Binding Profiles}" 
                                       SelectedItem="{Binding SelectedProfile}"
                                       DisplayMemberPath="Name" VerticalContentAlignment="Center"/>
                         </Grid>

@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 
+# Archived Python legacy version
+python_legacy/
+
 # Local folders
 logs/
 downloads/
@@ -53,5 +56,7 @@ _platypus_dirs.txt
 dotnet/installer/output/
 dotnet/installer/WebsiteDownloader.wxs
 dotnet/installer/License.rtf
+dotnet/installer/publish/
+installer/msi/output/
 .wix/
 .wix/
