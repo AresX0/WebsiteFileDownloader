@@ -7,7 +7,7 @@
     3. Builds the MSI with WiX 6
 #>
 param(
-    [string]$Version = "2.0.0",
+    [string]$Version = "2.1.1",
     [string]$Configuration = "Release"
 )
 

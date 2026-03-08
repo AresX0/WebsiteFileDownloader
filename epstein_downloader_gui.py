@@ -1,7 +1,7 @@
 ﻿# EpsteinFilesDownloader v1.0.0
 # (C) 2025 - Refactored for clarity, maintainability, and efficiency
 
-__version__ = "1.0.0"
+__version__ = "2.1.1"
 
 """EpsteinFilesDownloader GUI module.
 
@@ -1007,26 +1007,82 @@ class DownloaderGUI:
         self.url_listbox.activate(index + 1)
 
     def check_for_updates(self):
-        # Non-blocking update check (example: check GitHub releases or a version file)
+        """Check GitHub for a newer version and offer to download & install the MSI."""
         import threading
+
+        GITHUB_REPO = "AresX0/WebsiteFileDownloader"
+        VERSION_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/VERSION.txt"
+        RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+
+        def _prompt_and_install(latest_version, asset_url, asset_name):
+            """Ask user to install the update, download the MSI, and launch it."""
+            answer = messagebox.askyesno(
+                "Update Available",
+                f"A new version is available: {latest_version}\n"
+                f"You are running: {__version__}\n\n"
+                "Do you want to download and install the update now?\n"
+                "(The installer will upgrade your current installation.)",
+            )
+            if not answer:
+                return
+
+            # Show a progress window
+            prog_win = tk.Toplevel(self.root)
+            prog_win.title("Downloading Update...")
+            prog_win.geometry("420x120")
+            prog_win.resizable(False, False)
+            prog_label = ttk.Label(prog_win, text=f"Downloading {asset_name}...", font=("Segoe UI", 11))
+            prog_label.pack(pady=(15, 5))
+            prog_bar = ttk.Progressbar(prog_win, mode="indeterminate", length=350)
+            prog_bar.pack(pady=5)
+            prog_bar.start(15)
+
+            def _do_download():
+                try:
+                    import requests
+                    dl_path = os.path.join(tempfile.gettempdir(), asset_name)
+                    with requests.get(asset_url, stream=True, timeout=120, headers={"Accept": "application/octet-stream"}) as resp:
+                        resp.raise_for_status()
+                        with open(dl_path, "wb") as f:
+                            for chunk in resp.iter_content(chunk_size=1024 * 256):
+                                if chunk:
+                                    f.write(chunk)
+
+                    self.root.after(0, lambda: prog_bar.stop())
+                    self.root.after(0, lambda: prog_label.config(text="Download complete. Launching installer..."))
+
+                    # Launch the MSI installer.  msiexec /i will upgrade via MajorUpgrade.
+                    if dl_path.lower().endswith(".msi"):
+                        subprocess.Popen(["msiexec", "/i", dl_path], shell=False)
+                    elif dl_path.lower().endswith(".exe"):
+                        subprocess.Popen([dl_path], shell=False)
+                    else:
+                        # Fallback: open the file with the system handler
+                        os.startfile(dl_path)
+
+                    # Give installer a moment then quit the running app so files aren't locked
+                    self.root.after(2000, self.root.quit)
+                except Exception as e:
+                    err = str(e)
+                    self.root.after(0, lambda: prog_bar.stop())
+                    self.root.after(0, lambda: prog_label.config(text="Download failed."))
+                    self.root.after(
+                        0,
+                        lambda: messagebox.showerror("Update Failed", f"Could not download update:\n{err}"),
+                    )
+                    self.root.after(500, lambda: prog_win.destroy())
+
+            threading.Thread(target=_do_download, daemon=True).start()
 
         def do_check():
             try:
                 import requests
 
-                url = "https://raw.githubusercontent.com/JosephThePlatypus/EpsteinFilesDownloader/main/VERSION.txt"
-                r = requests.get(url, timeout=10)
+                # 1) Quick version check via VERSION.txt
+                r = requests.get(VERSION_URL, timeout=10)
                 if r.status_code == 200:
                     latest = r.text.strip()
-                    if latest != __version__:
-                        self.root.after(
-                            0,
-                            lambda: messagebox.showinfo(
-                                "Update Available",
-                                f"A new version is available: {latest}\nYou are running: {__version__}",
-                            ),
-                        )
-                    else:
+                    if latest == __version__:
                         self.root.after(
                             0,
                             lambda: messagebox.showinfo(
@@ -1034,21 +1090,72 @@ class DownloaderGUI:
                                 f"You are running the latest version: {__version__}",
                             ),
                         )
+                        return
                 else:
-                    # Provide a clearer message including HTTP status for troubleshooting
-                    try:
-                        snippet = r.text.strip()[:200]
-                    except Exception:
-                        snippet = ""
+                    latest = None
+
+                # 2) Fetch latest release from GitHub API to find the MSI/EXE asset
+                api_resp = requests.get(RELEASES_API, timeout=15, headers={"Accept": "application/vnd.github+json"})
+                if api_resp.status_code != 200:
                     self.root.after(
                         0,
                         lambda: messagebox.showwarning(
                             "Update Check Failed",
-                            f"Could not check for updates (HTTP {r.status_code}).\nURL: {url}\n{snippet}",
+                            f"Could not fetch release info (HTTP {api_resp.status_code}).\n"
+                            f"Visit https://github.com/{GITHUB_REPO}/releases to download manually.",
+                        ),
+                    )
+                    return
+
+                release = api_resp.json()
+                tag = release.get("tag_name", "").lstrip("v")
+                if not latest:
+                    latest = tag
+                if latest == __version__:
+                    self.root.after(
+                        0,
+                        lambda: messagebox.showinfo(
+                            "Up to Date",
+                            f"You are running the latest version: {__version__}",
+                        ),
+                    )
+                    return
+
+                # Find a suitable installer asset (.msi preferred, then .exe)
+                asset_url = None
+                asset_name = None
+                for asset in release.get("assets", []):
+                    name = asset.get("name", "")
+                    if name.lower().endswith(".msi"):
+                        asset_url = asset.get("browser_download_url")
+                        asset_name = name
+                        break
+                if not asset_url:
+                    for asset in release.get("assets", []):
+                        name = asset.get("name", "")
+                        if name.lower().endswith(".exe") and "setup" in name.lower() or "installer" in name.lower():
+                            asset_url = asset.get("browser_download_url")
+                            asset_name = name
+                            break
+
+                if asset_url:
+                    _latest = latest
+                    _url = asset_url
+                    _name = asset_name
+                    self.root.after(0, lambda: _prompt_and_install(_latest, _url, _name))
+                else:
+                    # No installer asset found — point user to releases page
+                    releases_url = f"https://github.com/{GITHUB_REPO}/releases/latest"
+                    self.root.after(
+                        0,
+                        lambda: messagebox.showinfo(
+                            "Update Available",
+                            f"A new version is available: {latest}\n"
+                            f"You are running: {__version__}\n\n"
+                            f"Download it from:\n{releases_url}",
                         ),
                     )
             except Exception as e:
-                # Surface exception details to help debugging network/SSL issues
                 err_text = str(e)
                 self.root.after(
                     0,
@@ -1934,9 +2041,14 @@ class DownloaderGUI:
         )
 
     def create_menu(self):
-        menubar = tk.Menu(self.root)
+        # Use dark foreground on menus so text is legible on light backgrounds
+        _menu_fg = "#1a1a1a"
+        _menu_bg = "#f5f5f5" if not getattr(self, 'dark_mode', False) else "#2b2b2b"
+        _menu_fg_actual = _menu_fg if not getattr(self, 'dark_mode', False) else "#eeeeee"
+        _menu_opts = dict(foreground=_menu_fg_actual, background=_menu_bg, activeforeground="#ffffff", activebackground="#0078d7")
+        menubar = tk.Menu(self.root, **_menu_opts)
         # File menu
-        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu = tk.Menu(menubar, tearoff=0, **_menu_opts)
         file_menu.add_command(
             label="Set Download Folder...", command=self.pick_download_folder
         )
@@ -1957,7 +2069,7 @@ class DownloaderGUI:
         menubar.add_cascade(label="File", menu=file_menu)
 
         # Settings menu (moved out of File)
-        settings_menu = tk.Menu(menubar, tearoff=0)
+        settings_menu = tk.Menu(menubar, tearoff=0, **_menu_opts)
         # Quick entries to open specific settings tabs (kept for test compatibility)
         try:
             settings_menu.add_command(label="Open General Settings...", command=lambda: self.open_settings_dialog(default_tab='General'))
@@ -1990,7 +2102,7 @@ class DownloaderGUI:
         menubar.add_cascade(label="Settings", menu=settings_menu)
 
         # View menu
-        view_menu = tk.Menu(menubar, tearoff=0)
+        view_menu = tk.Menu(menubar, tearoff=0, **_menu_opts)
         view_menu.add_command(
             label="Toggle Dark/Light Mode", command=self.toggle_dark_mode
         )
@@ -2003,7 +2115,7 @@ class DownloaderGUI:
         menubar.add_cascade(label="View", menu=view_menu)
 
         # Tools menu
-        tools_menu = tk.Menu(menubar, tearoff=0)
+        tools_menu = tk.Menu(menubar, tearoff=0, **_menu_opts)
         tools_menu.add_command(
             label="Check for Updates", command=self.check_for_updates
         )
@@ -2021,7 +2133,7 @@ class DownloaderGUI:
 
         # Help menu
 
-        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu = tk.Menu(menubar, tearoff=0, **_menu_opts)
         help_menu.add_command(label="Help", command=self.show_help_dialog)
         help_menu.add_command(label="About", command=self.show_about_dialog)
         help_menu.add_command(
@@ -4505,13 +4617,33 @@ class DownloaderGUI:
 
         # --- Main Downloader UI ---
 
-        # Title
+        # Header with logo and title
+        header_frame = ttk.Frame(self.frame)
+        header_frame.grid(row=0, column=0, columnspan=4, pady=(10, 20), sticky="nsew")
+        # Try to load the logo image
+        self._header_logo_ref = None
+        try:
+            if HAVE_PIL:
+                _logo_candidates = [
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png"),
+                    _installed_path("logo.png"),
+                    "logo.png",
+                ]
+                for _lp in _logo_candidates:
+                    if os.path.exists(_lp):
+                        _hdr_img = Image.open(_lp).resize((64, 64), Image.LANCZOS)
+                        self._header_logo_ref = ImageTk.PhotoImage(_hdr_img)
+                        logo_label = ttk.Label(header_frame, image=self._header_logo_ref)
+                        logo_label.pack(side="left", padx=(0, 12))
+                        break
+        except Exception:
+            pass
         title = ttk.Label(
-            self.frame,
+            header_frame,
             text="Epstein Court Records Downloader",
             font=("Segoe UI", 26, "bold"),
         )
-        title.grid(row=0, column=0, columnspan=4, pady=(10, 20), sticky="nsew")
+        title.pack(side="left")
 
         # --- Download Controls Group ---
         download_controls = ttk.LabelFrame(
@@ -7306,12 +7438,24 @@ def main():
         root = tk.Tk()
     root.title("EpsteinFilesDownloader")
     try:
-        # Prefer explicit icon if present; wrap in defensive try so headless/test runs won't error
-        if os.path.exists(_installed_path("JosephThePlatypus.ico")):
-            root.iconbitmap(_installed_path("JosephThePlatypus.ico"))
-        else:
-            # attempt local file first, then installed path
-            root.iconbitmap("JosephThePlatypus.ico")
+        # Prefer logo.ico for the window icon
+        _ico_candidates = [
+            _installed_path("logo.ico"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.ico"),
+            "logo.ico",
+        ]
+        _icon_set = False
+        for _ip in _ico_candidates:
+            if os.path.exists(_ip):
+                root.iconbitmap(_ip)
+                _icon_set = True
+                break
+        if not _icon_set:
+            # Fallback to old icon
+            if os.path.exists(_installed_path("JosephThePlatypus.ico")):
+                root.iconbitmap(_installed_path("JosephThePlatypus.ico"))
+            else:
+                root.iconbitmap("JosephThePlatypus.ico")
     except Exception as e:
         print(f"Warning: Could not set window icon: {e}")
     # Check for headless mode (CI smoke tests)

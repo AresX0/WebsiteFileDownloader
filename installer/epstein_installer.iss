@@ -1,8 +1,11 @@
 ; Inno Setup script to install EpsteinFilesDownloader
 ; Place this file in the repo under `installer\epstein_installer.iss` and compile with Inno Setup Compiler (ISCC.exe)
+#define SrcDir "..\"
+
 [Setup]
 AppName=EpsteinFilesDownloader
-AppVersion=1.0.0
+AppVersion=2.1.1
+AppId={{8E2F4A1B-3C5D-4E6F-A7B8-9C0D1E2F3A4B}
 DefaultDirName={pf}\PlatypusFiles\WebsiteFileDownloader
 DefaultGroupName=EpsteinFilesDownloader
 Uninstallable=yes
@@ -12,37 +15,35 @@ SolidCompression=yes
 OutputDir=output
 OutputBaseFilename=EpsteinFilesDownloader_Setup
 PrivilegesRequired=admin
-; Overwrite pre-existing files silently
+SetupIconFile={#SrcDir}logo.ico
+; Overwrite pre-existing files silently — same AppId means upgrade in place
 DisableDirPage=yes
 DisableProgramGroupPage=yes
+; Close running instances before installing so files are not locked
+CloseApplications=force
+RestartApplications=no
+
+[Tasks]
+Name: "desktopicon"; Description: "Create a &desktop icon"; GroupDescription: "Additional icons:"; Flags: unchecked
 
 [Files]
-; Main application exe
-Source: "{#GetSourceFilePath('dist\\EpsteinDownloader.exe')}"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs overwritealways
-; Include any additional files you want installed (config defaults, assets)
-Source: "config.json"; DestDir: "{app}"; Flags: ignoreversion overwritealways
-Source: "queue_state.json"; DestDir: "{app}"; Flags: ignoreversion overwritealways
-Source: "assets\\*"; DestDir: "{app}\\assets"; Flags: recursesubdirs createallsubdirs ignoreversion overwritealways
+; Main application exe (PyInstaller one-file build)
+Source: "{#SrcDir}dist\EpsteinDownloader.exe"; DestDir: "{app}"; Flags: ignoreversion
+; Include any additional files you want installed (config defaults, assets, branding)
+Source: "{#SrcDir}config.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SrcDir}queue_state.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SrcDir}assets\*"; DestDir: "{app}\assets"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#SrcDir}logo.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SrcDir}logo.png"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SrcDir}VERSION.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SrcDir}README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\EpsteinFilesDownloader"; Filename: "{app}\EpsteinDownloader.exe"; WorkingDir: "{app}"; IconFilename: "{app}\JosephThePlatypus.ico"; Tasks: desktopicon
-Name: "{userdesktop}\EpsteinFilesDownloader"; Filename: "{app}\EpsteinDownloader.exe"; WorkingDir: "{app}"; IconFilename: "{app}\JosephThePlatypus.ico"; Tasks: desktopicon
+Name: "{group}\EpsteinFilesDownloader"; Filename: "{app}\EpsteinDownloader.exe"; WorkingDir: "{app}"; IconFilename: "{app}\logo.ico"
+Name: "{userdesktop}\EpsteinFilesDownloader"; Filename: "{app}\EpsteinDownloader.exe"; WorkingDir: "{app}"; IconFilename: "{app}\logo.ico"; Tasks: desktopicon
 
 [Run]
-; Post-install: run app once to install runtime prereqs and Playwright browsers (internet required)
-; We run both steps silently in a hidden process. If any step fails, the user can rerun manually.
-Filename: "{app}\EpsteinDownloader.exe"; Parameters: "--install-prereqs"; StatusMsg: "Installing runtime prerequisites (pip packages)..."; RunOnceId: InstallPrereqs; Flags: runhidden waituntilterminated
-Filename: "{app}\EpsteinDownloader.exe"; Parameters: "--install-browsers"; StatusMsg: "Installing Playwright browsers (downloads Chromium)..."; RunOnceId: InstallPlaywright; Flags: runhidden waituntilterminated
+Filename: "{app}\EpsteinDownloader.exe"; Description: "Launch EpsteinFilesDownloader"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-Type: files; Name: "{app}\EpsteinDownloader.exe"
-Type: files; Name: "{app}\config.json"
-Type: files; Name: "{app}\queue_state.json"
-Type: files; Name: "{app}\assets\*"
-
-; Helper function used to expand the dist path at compile time
-[Code]
-function GetSourceFilePath(RelPath: String): String;
-begin
-  Result := ExpandConstant(ExpandConstant('{#SrcDir}')) + '\\' + RelPath;
-end;
+Type: filesandordirs; Name: "{app}"

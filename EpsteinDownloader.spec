@@ -5,7 +5,7 @@ a = Analysis(
     ['epstein_downloader_gui.py'],
     pathex=[],
     binaries=[],
-    datas=[('config.json', '.'), ('queue_state.json', '.'), ('assets', 'assets')],
+    datas=[('config.json', '.'), ('queue_state.json', '.'), ('assets', 'assets'), ('logo.png', '.'), ('logo.ico', '.'), ('VERSION.txt', '.')],
     hiddenimports=['google', 'google.oauth2', 'googleapiclient', 'gdown', 'playwright'],
     hookspath=[],
     hooksconfig={},
@@ -35,4 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='logo.ico',
 )
