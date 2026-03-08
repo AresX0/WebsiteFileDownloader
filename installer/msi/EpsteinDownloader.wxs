@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Package Name="EpsteinFilesDownloader"
+           Manufacturer="AresX0"
+           Version="2.1.1"
+           UpgradeCode="8E2F4A1B-3C5D-4E6F-A7B8-9C0D1E2F3A4B"
+           Scope="perUser"
+           InstallerVersion="500">
+
+    <!-- Upgrade: removes any older version with the same UpgradeCode before installing -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of EpsteinFilesDownloader is already installed."
+                  Schedule="afterInstallInitialize" />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Install into %LOCALAPPDATA%\EpsteinFilesDownloader -->
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="INSTALLFOLDER" Name="EpsteinFilesDownloader">
+        <Directory Id="AssetsFolder" Name="assets" />
+      </Directory>
+    </StandardDirectory>
+
+    <!-- Main application files -->
+    <ComponentGroup Id="MainFiles" Directory="INSTALLFOLDER">
+      <Component Id="MainExe" Guid="*">
+        <File Id="EpsteinDownloaderExe" Source="$(var.DistDir)\EpsteinDownloader.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="LogoIco" Guid="*">
+        <File Id="LogoIcoFile" Source="$(var.RepoDir)\logo.ico" KeyPath="yes" />
+      </Component>
+      <Component Id="LogoPng" Guid="*">
+        <File Id="LogoPngFile" Source="$(var.RepoDir)\logo.png" KeyPath="yes" />
+      </Component>
+      <Component Id="ConfigJson" Guid="*">
+        <File Id="ConfigJsonFile" Source="$(var.RepoDir)\config.json" KeyPath="yes" />
+      </Component>
+      <Component Id="QueueState" Guid="*">
+        <File Id="QueueStateFile" Source="$(var.RepoDir)\queue_state.json" KeyPath="yes" />
+      </Component>
+      <Component Id="VersionTxt" Guid="*">
+        <File Id="VersionTxtFile" Source="$(var.RepoDir)\VERSION.txt" KeyPath="yes" />
+      </Component>
+      <Component Id="ReadmeMd" Guid="*">
+        <File Id="ReadmeMdFile" Source="$(var.RepoDir)\README.md" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Start Menu shortcut -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ProgramMenuDir" Name="EpsteinFilesDownloader" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="Shortcuts">
+      <Component Id="StartMenuShortcut" Directory="ProgramMenuDir" Guid="*">
+        <Shortcut Id="AppStartMenuShortcut"
+                  Name="EpsteinFilesDownloader"
+                  Target="[INSTALLFOLDER]EpsteinDownloader.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon" />
+        <RemoveFolder Id="RemoveProgramMenuDir" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\AresX0\EpsteinFilesDownloader"
+                       Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+      <Component Id="DesktopShortcut" Directory="DesktopFolder" Guid="*">
+        <Shortcut Id="AppDesktopShortcut"
+                  Name="EpsteinFilesDownloader"
+                  Target="[INSTALLFOLDER]EpsteinDownloader.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon" />
+        <RegistryValue Root="HKCU" Key="Software\AresX0\EpsteinFilesDownloader"
+                       Name="desktop_shortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Icon Id="AppIcon" SourceFile="$(var.RepoDir)\logo.ico" />
+
+    <Feature Id="MainFeature" Title="EpsteinFilesDownloader" Level="1">
+      <ComponentGroupRef Id="MainFiles" />
+      <ComponentGroupRef Id="Shortcuts" />
+    </Feature>
+
+  </Package>
+</Wix>
