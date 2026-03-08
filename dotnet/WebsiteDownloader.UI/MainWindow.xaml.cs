@@ -190,13 +190,27 @@ public partial class MainWindow : Window
 
     private void OnAboutClick(object sender, RoutedEventArgs e)
     {
-        MessageBox.Show(
-            "Website File Downloader v1.0\n\n" +
+        var result = MessageBox.Show(
+            "Website File Downloader v2.0\n\n" +
             "A generic website file downloader with pagination,\n" +
             "SHA-256 dedup, proxy support, scheduling,\n" +
             "and Google Drive integration.\n\n" +
-            "Built with .NET 10 + WPF.",
-            "About", MessageBoxButton.OK, MessageBoxImage.Information);
+            "Built with .NET 10 + WPF.\n\n" +
+            "Developed by Platysoft\n" +
+            "https://PlatySoft.com",
+            "About — Platysoft", MessageBoxButton.OKCancel, MessageBoxImage.Information);
+        if (result == MessageBoxResult.Cancel)
+            return;
+        // If user clicks OK, open the Platysoft website
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "https://PlatySoft.com",
+                UseShellExecute = true
+            });
+        }
+        catch { /* ignore if browser fails to open */ }
     }
 
     private async void OnCheckUpdatesClick(object sender, RoutedEventArgs e)

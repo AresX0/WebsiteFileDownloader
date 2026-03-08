@@ -5,7 +5,7 @@
         Title="Website File Downloader" 
         Height="850" Width="1200" MinWidth="900" MinHeight="650"
         WindowStartupLocation="CenterScreen"
-        Background="{StaticResource SurfaceBrush}"
+        Background="{DynamicResource SurfaceBrush}"
         AllowDrop="True" Drop="OnDrop" DragOver="OnDragOver"
         Closing="OnWindowClosing"
         KeyDown="OnKeyDown">
@@ -17,7 +17,7 @@
         </Grid.RowDefinitions>
 
         <!-- Menu Bar -->
-        <Menu Grid.Row="0" Background="{StaticResource SurfaceLightBrush}" Foreground="{StaticResource TextPrimaryBrush}">
+        <Menu Grid.Row="0" Background="{DynamicResource SurfaceLightBrush}" Foreground="{DynamicResource TextPrimaryBrush}">
             <MenuItem Header="_File">
                 <MenuItem Header="_Settings..." Click="OnSettingsClick" InputGestureText="Ctrl+,"/>
                 <MenuItem Header="Schedule _Downloads..." Click="OnScheduleClick"/>
@@ -75,17 +75,17 @@
                                 <ColumnDefinition Width="250"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Text="Website File Downloader" 
-                                       FontSize="22" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}"
+                                       FontSize="22" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}"
                                        VerticalAlignment="Center"/>
                             <TextBlock Grid.Column="2" Text="Profile:" VerticalAlignment="Center" Margin="0,0,8,0"
-                                       Foreground="{StaticResource TextSecondaryBrush}"/>
+                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
                             <ComboBox Grid.Column="3" ItemsSource="{Binding Profiles}" 
                                       SelectedItem="{Binding SelectedProfile}"
                                       DisplayMemberPath="Name" VerticalContentAlignment="Center"/>
                         </Grid>
 
                         <!-- Row 1: URL Input + Queue -->
-                        <Border Grid.Row="1" Background="{StaticResource SurfaceLightBrush}" CornerRadius="6"
+                        <Border Grid.Row="1" Background="{DynamicResource SurfaceLightBrush}" CornerRadius="6"
                                 Padding="12" Margin="0,0,0,8">
                             <Grid>
                                 <Grid.RowDefinitions>
@@ -101,7 +101,7 @@
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="URL:" VerticalAlignment="Center" Margin="0,0,10,0"
-                                               Foreground="{StaticResource TextSecondaryBrush}" FontWeight="SemiBold"/>
+                                               Foreground="{DynamicResource TextSecondaryBrush}" FontWeight="SemiBold"/>
                                     <TextBox Grid.Column="1" x:Name="UrlTextBox"
                                              Text="{Binding Url, UpdateSourceTrigger=PropertyChanged}"
                                              VerticalContentAlignment="Center" Padding="8,6" FontSize="14"
@@ -121,7 +121,7 @@
 
                                 <!-- URL Queue -->
                                 <Expander Grid.Row="1" Header="URL Queue" Margin="0,6,0,0" IsExpanded="False"
-                                          Foreground="{StaticResource TextSecondaryBrush}">
+                                          Foreground="{DynamicResource TextSecondaryBrush}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -129,8 +129,8 @@
                                         </Grid.ColumnDefinitions>
                                         <ListBox x:Name="QueueListBox" Grid.Column="0" 
                                                  ItemsSource="{Binding QueueUrls}" Height="100"
-                                                 Background="Transparent" Foreground="{StaticResource TextPrimaryBrush}"
-                                                 BorderThickness="1" BorderBrush="{StaticResource BorderBrush}">
+                                                 Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}"
+                                                 BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}">
                                             <ListBox.ContextMenu>
                                                 <ContextMenu>
                                                     <MenuItem Header="Remove" Click="OnQueueRemove"/>
@@ -153,7 +153,7 @@
                         </Border>
 
                         <!-- Row 2: Download Options -->
-                        <Border Grid.Row="2" Background="{StaticResource SurfaceLightBrush}" CornerRadius="6"
+                        <Border Grid.Row="2" Background="{DynamicResource SurfaceLightBrush}" CornerRadius="6"
                                 Padding="12" Margin="0,0,0,8">
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -172,81 +172,81 @@
 
                                 <!-- Column 0: File Types -->
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="File Types" FontWeight="SemiBold"
-                                           Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6"/>
+                                           Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,6"/>
                                 <CheckBox Grid.Row="1" Grid.Column="0" Content=" Documents (PDF, DOC, XLS...)"
                                           IsChecked="{Binding DownloadDocuments}" Margin="0,3"
-                                          Foreground="{StaticResource TextPrimaryBrush}"
+                                          Foreground="{DynamicResource TextPrimaryBrush}"
                                           ToolTip="Download document files including PDF, DOC, XLS, PPT, TXT, CSV, RTF"/>
                                 <CheckBox Grid.Row="2" Grid.Column="0" Content=" Images (JPG, PNG, SVG...)"
                                           IsChecked="{Binding DownloadImages}" Margin="0,3"
-                                          Foreground="{StaticResource TextPrimaryBrush}"
+                                          Foreground="{DynamicResource TextPrimaryBrush}"
                                           ToolTip="Download image files including JPG, PNG, GIF, SVG, WEBP, BMP, TIFF"/>
                                 <CheckBox Grid.Row="3" Grid.Column="0" Content=" Videos (MP4, AVI, MKV...)"
                                           IsChecked="{Binding DownloadVideos}" Margin="0,3"
-                                          Foreground="{StaticResource TextPrimaryBrush}"
+                                          Foreground="{DynamicResource TextPrimaryBrush}"
                                           ToolTip="Download video files including MP4, AVI, MKV, MOV, WMV, FLV"/>
                                 <CheckBox Grid.Row="4" Grid.Column="0" Content=" Archives (ZIP, RAR, 7Z...)"
                                           IsChecked="{Binding DownloadArchives}" Margin="0,3"
-                                          Foreground="{StaticResource TextPrimaryBrush}"
+                                          Foreground="{DynamicResource TextPrimaryBrush}"
                                           ToolTip="Download archive files including ZIP, RAR, 7Z, TAR, GZ"/>
 
                                 <!-- Column 1: Crawl Settings -->
                                 <TextBlock Grid.Row="0" Grid.Column="1" Text="Crawl Settings" FontWeight="SemiBold"
-                                           Foreground="{StaticResource TextSecondaryBrush}" Margin="16,0,0,6"/>
+                                           Foreground="{DynamicResource TextSecondaryBrush}" Margin="16,0,0,6"/>
                                 <CheckBox Grid.Row="1" Grid.Column="1" Content=" Follow Pagination"
                                           IsChecked="{Binding FollowPagination}" Margin="16,3,0,3"
-                                          Foreground="{StaticResource TextPrimaryBrush}"
+                                          Foreground="{DynamicResource TextPrimaryBrush}"
                                           ToolTip="Follow ?page=N links to get all results"/>
                                 <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="16,3,0,3">
                                     <TextBlock Text="Max Pages:" VerticalAlignment="Center" Margin="0,0,8,0"
-                                               Foreground="{StaticResource TextPrimaryBrush}"/>
+                                               Foreground="{DynamicResource TextPrimaryBrush}"/>
                                     <TextBox Text="{Binding MaxPaginationPages}" Width="70" VerticalContentAlignment="Center" Padding="4,2"
                                              ToolTip="Maximum number of pages to crawl (0 = unlimited)"/>
                                 </StackPanel>
                                 <CheckBox Grid.Row="3" Grid.Column="1" Content=" Recursive Crawl Sub-links"
                                           IsChecked="{Binding RecursiveCrawl}" Margin="16,3,0,3"
-                                          Foreground="{StaticResource TextPrimaryBrush}"
+                                          Foreground="{DynamicResource TextPrimaryBrush}"
                                           ToolTip="Follow discovered links to sub-pages and scan those too"/>
                                 <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Margin="16,3,0,3">
                                     <TextBlock Text="Max Depth:" VerticalAlignment="Center" Margin="0,0,8,0"
-                                               Foreground="{StaticResource TextPrimaryBrush}"/>
+                                               Foreground="{DynamicResource TextPrimaryBrush}"/>
                                     <TextBox Text="{Binding MaxDepth}" Width="50" VerticalContentAlignment="Center" Padding="4,2"
                                              ToolTip="Maximum recursion depth"/>
                                 </StackPanel>
 
                                 <!-- Column 2: Advanced -->
                                 <TextBlock Grid.Row="0" Grid.Column="2" Text="Advanced" FontWeight="SemiBold"
-                                           Foreground="{StaticResource TextSecondaryBrush}" Margin="16,0,0,6"/>
+                                           Foreground="{DynamicResource TextSecondaryBrush}" Margin="16,0,0,6"/>
                                 <CheckBox Grid.Row="1" Grid.Column="2" Content=" Use Browser (Playwright)"
                                           IsChecked="{Binding UseBrowserForScan}" Margin="16,3,0,3"
-                                          Foreground="{StaticResource TextPrimaryBrush}"
+                                          Foreground="{DynamicResource TextPrimaryBrush}"
                                           ToolTip="Use a real browser for JS-rendered pages or CAPTCHA sites"/>
                                 <CheckBox Grid.Row="2" Grid.Column="2" Content=" Headless Browser"
                                           IsChecked="{Binding HeadlessBrowser}" Margin="16,3,0,3"
-                                          Foreground="{StaticResource TextPrimaryBrush}"
+                                          Foreground="{DynamicResource TextPrimaryBrush}"
                                           IsEnabled="{Binding UseBrowserForScan}"
                                           ToolTip="Run the browser without a visible window"/>
                                 <StackPanel Grid.Row="3" Grid.Column="2" Orientation="Horizontal" Margin="16,3,0,3">
                                     <TextBlock Text="Concurrent:" VerticalAlignment="Center" Margin="0,0,8,0"
-                                               Foreground="{StaticResource TextPrimaryBrush}"/>
+                                               Foreground="{DynamicResource TextPrimaryBrush}"/>
                                     <TextBox Text="{Binding MaxConcurrentDownloads}" Width="50" VerticalContentAlignment="Center" Padding="4,2"
                                              ToolTip="Number of simultaneous downloads (1-32)"/>
                                 </StackPanel>
                                 <StackPanel Grid.Row="4" Grid.Column="2" Orientation="Horizontal" Margin="16,3,0,3">
                                     <TextBlock Text="Delay (ms):" VerticalAlignment="Center" Margin="0,0,8,0"
-                                               Foreground="{StaticResource TextPrimaryBrush}"/>
+                                               Foreground="{DynamicResource TextPrimaryBrush}"/>
                                     <TextBox Text="{Binding RequestDelayMs}" Width="70" VerticalContentAlignment="Center" Padding="4,2"
                                              ToolTip="Delay between HTTP requests in milliseconds"/>
                                 </StackPanel>
                                 <CheckBox Grid.Row="5" Grid.Column="2" Content=" Skip Duplicates (SHA-256)"
                                           IsChecked="{Binding SkipDuplicates}" Margin="16,3,0,3"
-                                          Foreground="{StaticResource TextPrimaryBrush}"
+                                          Foreground="{DynamicResource TextPrimaryBrush}"
                                           ToolTip="Hash downloaded files and skip duplicates across runs"/>
                             </Grid>
                         </Border>
 
                         <!-- Row 3: URL Pattern Filter + Output -->
-                        <Border Grid.Row="3" Background="{StaticResource SurfaceLightBrush}" CornerRadius="6"
+                        <Border Grid.Row="3" Background="{DynamicResource SurfaceLightBrush}" CornerRadius="6"
                                 Padding="12" Margin="0,0,0,8">
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -258,12 +258,12 @@
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Text="URL Filter (regex):" VerticalAlignment="Center" Margin="0,0,10,0"
-                                           Foreground="{StaticResource TextSecondaryBrush}" FontWeight="SemiBold"/>
+                                           Foreground="{DynamicResource TextSecondaryBrush}" FontWeight="SemiBold"/>
                                 <TextBox Grid.Column="1" Text="{Binding UrlPattern, UpdateSourceTrigger=PropertyChanged}"
                                          VerticalContentAlignment="Center" Padding="8,6"
                                          ToolTip="Optional regex to filter file URLs (e.g., \.pdf$ for PDFs only)"/>
                                 <TextBlock Grid.Column="3" Text="Output:" VerticalAlignment="Center" Margin="0,0,10,0"
-                                           Foreground="{StaticResource TextSecondaryBrush}" FontWeight="SemiBold"/>
+                                           Foreground="{DynamicResource TextSecondaryBrush}" FontWeight="SemiBold"/>
                                 <TextBox Grid.Column="4" Text="{Binding OutputDirectory, UpdateSourceTrigger=PropertyChanged}"
                                          VerticalContentAlignment="Center" Padding="8,6" Margin="0,0,10,0"
                                          ToolTip="Output directory for downloaded files"/>
@@ -294,7 +294,7 @@
                         </StackPanel>
 
                         <!-- Row 5: Summary Bar -->
-                        <Border Grid.Row="5" Background="{StaticResource SurfaceLightBrush}" CornerRadius="4"
+                        <Border Grid.Row="5" Background="{DynamicResource SurfaceLightBrush}" CornerRadius="4"
                                 Padding="8,4" Margin="0,0,0,4">
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -308,7 +308,7 @@
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" VerticalAlignment="Center" Margin="0,0,16,0"
-                                           Foreground="{StaticResource TextPrimaryBrush}">
+                                           Foreground="{DynamicResource TextPrimaryBrush}">
                                     <Run Text="Items: "/><Run Text="{Binding DownloadItems.Count, Mode=OneWay, FallbackValue=0}" FontWeight="Bold"/>
                                 </TextBlock>
                                 <TextBlock Grid.Column="1" VerticalAlignment="Center" Margin="0,0,16,0"
@@ -329,11 +329,11 @@
                                     <Run Text="⏳ Scanning..." FontWeight="Bold"/>
                                 </TextBlock>
                                 <TextBlock Grid.Column="6" VerticalAlignment="Center" Margin="0,0,16,0"
-                                           Foreground="{StaticResource TextPrimaryBrush}" FontFamily="Consolas">
+                                           Foreground="{DynamicResource TextPrimaryBrush}" FontFamily="Consolas">
                                     <Run Text="{Binding SpeedText, Mode=OneWay}"/>
                                 </TextBlock>
                                 <TextBlock Grid.Column="7" VerticalAlignment="Center"
-                                           Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas">
+                                           Foreground="{DynamicResource TextSecondaryBrush}" FontFamily="Consolas">
                                     <Run Text="{Binding EtaText, Mode=OneWay}"/>
                                 </TextBlock>
                             </Grid>
@@ -341,10 +341,10 @@
 
                         <!-- Row 6: GridSplitter -->
                         <GridSplitter Grid.Row="6" Height="5" HorizontalAlignment="Stretch"
-                                      Background="{StaticResource BorderBrush}" Cursor="SizeNS" ResizeDirection="Rows"/>
+                                      Background="{DynamicResource BorderBrush}" Cursor="SizeNS" ResizeDirection="Rows"/>
 
                         <!-- Row 7: Download Queue DataGrid -->
-                        <Border Grid.Row="7" Background="{StaticResource SurfaceLightBrush}" CornerRadius="6"
+                        <Border Grid.Row="7" Background="{DynamicResource SurfaceLightBrush}" CornerRadius="6"
                                 Padding="4" Margin="0,4,0,8">
                             <DataGrid x:Name="DownloadItemsDataGrid" ItemsSource="{Binding DownloadItems}"
                                       AutoGenerateColumns="False" CanUserAddRows="False"
@@ -353,7 +353,7 @@
                                       ColumnHeaderHeight="32" RowHeight="28"
                                       Background="Transparent" BorderThickness="0"
                                       GridLinesVisibility="Horizontal"
-                                      HorizontalGridLinesBrush="{StaticResource BorderBrush}">
+                                      HorizontalGridLinesBrush="{DynamicResource BorderBrush}">
                                 <DataGrid.ContextMenu>
                                     <ContextMenu>
                                         <MenuItem Header="Copy URL" Click="OnCopyItemUrl"/>
@@ -415,10 +415,10 @@
 
                         <!-- Row 8: Splitter between DataGrid and Log -->
                         <GridSplitter Grid.Row="8" Height="5" HorizontalAlignment="Stretch"
-                                      Background="{StaticResource BorderBrush}" Cursor="SizeNS" ResizeDirection="Rows"/>
+                                      Background="{DynamicResource BorderBrush}" Cursor="SizeNS" ResizeDirection="Rows"/>
 
                         <!-- Row 9: Log Pane (always visible) -->
-                        <Border Grid.Row="9" Background="{StaticResource SurfaceLightBrush}" CornerRadius="6"
+                        <Border Grid.Row="9" Background="{DynamicResource SurfaceLightBrush}" CornerRadius="6"
                                 Padding="4" Margin="0,4,0,4">
                             <Grid>
                                 <Grid.RowDefinitions>
@@ -432,7 +432,7 @@
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="📋 Log" FontWeight="SemiBold" FontSize="12"
-                                               Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center"/>
                                     <Button Grid.Column="2" Content="Clear" Command="{Binding ClearLogCommand}"
                                             Style="{StaticResource SecondaryButton}" MinWidth="60" Padding="8,2"/>
                                 </Grid>
@@ -440,13 +440,13 @@
                                          Text="{Binding LogText, Mode=OneWay}" IsReadOnly="True"
                                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
                                          TextWrapping="NoWrap" FontFamily="Consolas" FontSize="11"
-                                         Background="Transparent" Foreground="{StaticResource TextPrimaryBrush}"
+                                         Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}"
                                          BorderThickness="0" TextChanged="OnLogTextChanged"/>
                             </Grid>
                         </Border>
 
                         <!-- Row 10: Status Bar -->
-                        <Border Grid.Row="10" Background="{StaticResource SurfaceLightBrush}" CornerRadius="4" Padding="8,6">
+                        <Border Grid.Row="10" Background="{DynamicResource SurfaceLightBrush}" CornerRadius="4" Padding="8,6">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
@@ -455,14 +455,14 @@
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Text="{Binding StatusMessage}" VerticalAlignment="Center"
-                                           Foreground="{StaticResource TextPrimaryBrush}" TextTrimming="CharacterEllipsis"/>
+                                           Foreground="{DynamicResource TextPrimaryBrush}" TextTrimming="CharacterEllipsis"/>
                                 <TextBlock Grid.Column="1" Text="Overall:" VerticalAlignment="Center" Margin="0,0,8,0"
-                                           Foreground="{StaticResource TextSecondaryBrush}"/>
+                                           Foreground="{DynamicResource TextSecondaryBrush}"/>
                                 <ProgressBar Grid.Column="2" Height="18" Value="{Binding Progress}" Minimum="0" Maximum="100"
                                              Foreground="{StaticResource AccentBrush}"/>
                                 <TextBlock Grid.Column="3" Text="{Binding Progress, StringFormat={}{0}%}"
                                            VerticalAlignment="Center" Margin="8,0,0,0"
-                                           FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}"/>
+                                           FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}"/>
                             </Grid>
                         </Border>
                     </Grid>
@@ -477,7 +477,7 @@
                         </Grid.RowDefinitions>
 
                         <!-- Filter bar -->
-                        <Border Grid.Row="0" Background="{StaticResource SurfaceLightBrush}" CornerRadius="6"
+                        <Border Grid.Row="0" Background="{DynamicResource SurfaceLightBrush}" CornerRadius="6"
                                 Padding="12" Margin="0,0,0,8">
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -487,7 +487,7 @@
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Text="Search:" VerticalAlignment="Center" Margin="0,0,10,0"
-                                           Foreground="{StaticResource TextSecondaryBrush}" FontWeight="SemiBold"/>
+                                           Foreground="{DynamicResource TextSecondaryBrush}" FontWeight="SemiBold"/>
                                 <TextBox Grid.Column="1" Text="{Binding HistoryFilter, UpdateSourceTrigger=PropertyChanged}"
                                          VerticalContentAlignment="Center" Padding="8,6" Margin="0,0,10,0"
                                          ToolTip="Filter history by file name, URL, or status"/>
@@ -499,11 +499,11 @@
                         </Border>
 
                         <!-- History text display -->
-                        <Border Grid.Row="1" Background="{StaticResource SurfaceLightBrush}" CornerRadius="6" Padding="8">
+                        <Border Grid.Row="1" Background="{DynamicResource SurfaceLightBrush}" CornerRadius="6" Padding="8">
                             <TextBox Text="{Binding HistoryText, Mode=OneWay}" IsReadOnly="True"
                                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
                                      TextWrapping="NoWrap" FontFamily="Consolas" FontSize="11"
-                                     Background="Transparent" Foreground="{StaticResource TextPrimaryBrush}"
+                                     Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}"
                                      BorderThickness="0"/>
                         </Border>
                     </Grid>

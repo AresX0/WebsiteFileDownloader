@@ -60,8 +60,8 @@
             </Style>
 
             <Style x:Key="SecondaryButton" TargetType="Button" BasedOn="{StaticResource ActionButton}">
-                <Setter Property="Background" Value="{StaticResource SurfaceLightBrush}"/>
-                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                <Setter Property="Background" Value="{DynamicResource SurfaceLightBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
             </Style>
         </ResourceDictionary>
     </Application.Resources>

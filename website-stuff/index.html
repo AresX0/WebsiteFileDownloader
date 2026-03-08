@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Website File Downloader — Documentation &amp; Help</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --surface: #161b22;
+            --surface-light: #21262d;
+            --border: #30363d;
+            --text: #e6edf3;
+            --text-secondary: #8b949e;
+            --primary: #58a6ff;
+            --primary-dark: #1f6feb;
+            --accent: #3fb950;
+            --danger: #f85149;
+            --warning: #d29922;
+            --code-bg: #1c2129;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ─── Hero ─── */
+        .hero {
+            background: linear-gradient(135deg, #1a1e2e 0%, #0d1117 50%, #0a1628 100%);
+            border-bottom: 1px solid var(--border);
+            padding: 60px 0 50px;
+            text-align: center;
+        }
+        .hero h1 {
+            font-size: 2.8rem;
+            font-weight: 800;
+            margin-bottom: 12px;
+            background: linear-gradient(90deg, var(--primary), var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .hero .tagline {
+            font-size: 1.2rem;
+            color: var(--text-secondary);
+            max-width: 650px;
+            margin: 0 auto 28px;
+        }
+        .hero .badges {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            border: 1px solid var(--border);
+            background: var(--surface-light);
+        }
+        .badge.net { color: #a78bfa; }
+        .badge.win { color: var(--primary); }
+        .badge.ver { color: var(--accent); }
+
+        /* ─── Layout ─── */
+        .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+
+        /* ─── Nav ─── */
+        nav {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(13, 17, 23, 0.92);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+            padding: 14px 0;
+        }
+        nav .container {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        nav a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            padding: 6px 14px;
+            border-radius: 6px;
+            transition: all 0.15s ease;
+        }
+        nav a:hover { color: var(--text); background: var(--surface-light); }
+
+        /* ─── Sections ─── */
+        section { padding: 56px 0; }
+        section:nth-child(even) { background: var(--surface); }
+
+        h2 {
+            font-size: 1.9rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: var(--primary);
+        }
+        h2 .num {
+            display: inline-block;
+            width: 36px;
+            height: 36px;
+            line-height: 36px;
+            text-align: center;
+            background: var(--primary-dark);
+            color: #fff;
+            border-radius: 8px;
+            font-size: 1rem;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+        .section-desc {
+            color: var(--text-secondary);
+            font-size: 1.05rem;
+            margin-bottom: 32px;
+            max-width: 800px;
+        }
+
+        h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin: 28px 0 12px;
+            color: var(--text);
+        }
+
+        /* ─── Screenshot ─── */
+        .screenshot-wrap {
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            margin: 24px 0 32px;
+            background: #000;
+        }
+        .screenshot-wrap img {
+            width: 100%;
+            display: block;
+        }
+        .screenshot-caption {
+            padding: 10px 16px;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            background: var(--surface-light);
+            text-align: center;
+        }
+
+        /* ─── Feature cards ─── */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+            gap: 20px;
+            margin-top: 24px;
+        }
+        .feature-card {
+            background: var(--surface-light);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 24px;
+            transition: transform 0.15s ease, border-color 0.15s ease;
+        }
+        .feature-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--primary);
+        }
+        .feature-card .icon {
+            font-size: 1.6rem;
+            margin-bottom: 10px;
+        }
+        .feature-card h4 {
+            font-size: 1.05rem;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+        .feature-card p {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            line-height: 1.55;
+        }
+
+        /* ─── Steps ─── */
+        .steps {
+            counter-reset: step;
+            list-style: none;
+            padding: 0;
+        }
+        .steps li {
+            counter-increment: step;
+            position: relative;
+            padding: 16px 0 16px 64px;
+            border-left: 2px solid var(--border);
+            margin-left: 18px;
+        }
+        .steps li:last-child { border-left-color: transparent; }
+        .steps li::before {
+            content: counter(step);
+            position: absolute;
+            left: -18px;
+            top: 14px;
+            width: 34px;
+            height: 34px;
+            line-height: 34px;
+            text-align: center;
+            background: var(--primary-dark);
+            color: #fff;
+            border-radius: 50%;
+            font-size: 0.85rem;
+            font-weight: 700;
+        }
+        .steps li strong { color: var(--text); }
+        .steps li p { color: var(--text-secondary); margin-top: 4px; }
+
+        /* ─── Table ─── */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+        }
+        th, td {
+            text-align: left;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        th { background: var(--surface-light); color: var(--text-secondary); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        td { font-size: 0.95rem; }
+        tr:hover td { background: rgba(88, 166, 255, 0.04); }
+
+        /* ─── Keyboard shortcuts ─── */
+        kbd {
+            display: inline-block;
+            padding: 2px 8px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.82rem;
+            background: var(--surface-light);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            box-shadow: inset 0 -1px 0 var(--border);
+        }
+
+        code {
+            font-family: 'Consolas', 'Monaco', monospace;
+            background: var(--code-bg);
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-size: 0.88rem;
+        }
+        pre {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 18px;
+            overflow-x: auto;
+            font-size: 0.88rem;
+            line-height: 1.6;
+            margin: 12px 0;
+        }
+
+        /* ─── Callouts ─── */
+        .callout {
+            padding: 16px 20px;
+            border-radius: 8px;
+            margin: 16px 0;
+            font-size: 0.95rem;
+        }
+        .callout.tip {
+            background: rgba(63, 185, 80, 0.08);
+            border-left: 4px solid var(--accent);
+        }
+        .callout.warn {
+            background: rgba(210, 153, 34, 0.08);
+            border-left: 4px solid var(--warning);
+        }
+        .callout.info {
+            background: rgba(88, 166, 255, 0.08);
+            border-left: 4px solid var(--primary);
+        }
+        .callout strong { display: block; margin-bottom: 4px; }
+
+        /* ─── FAQ accordion ─── */
+        details {
+            background: var(--surface-light);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin: 8px 0;
+            transition: border-color 0.15s;
+        }
+        details[open] { border-color: var(--primary); }
+        summary {
+            padding: 14px 18px;
+            cursor: pointer;
+            font-weight: 600;
+            list-style: none;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        summary::before {
+            content: '▸';
+            transition: transform 0.15s;
+            color: var(--primary);
+        }
+        details[open] summary::before { transform: rotate(90deg); }
+        details .answer { padding: 0 18px 16px; color: var(--text-secondary); line-height: 1.6; }
+
+        /* ─── Footer ─── */
+        footer {
+            text-align: center;
+            padding: 40px 0;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            border-top: 1px solid var(--border);
+        }
+        footer a { color: var(--primary); text-decoration: none; }
+
+        /* ─── Responsive ─── */
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 2rem; }
+            .hero { padding: 40px 0 30px; }
+            section { padding: 36px 0; }
+            .features-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ═══════════════════════ HERO ═══════════════════════ -->
+<header class="hero">
+    <div class="container">
+        <h1>Website File Downloader</h1>
+        <p class="tagline">
+            A powerful, modern Windows desktop application for scanning websites and batch-downloading files. 
+            Built with .NET 10 and WPF for a fast, native experience.
+        </p>
+        <div class="badges">
+            <span class="badge net">⬡ .NET 10 / WPF</span>
+            <span class="badge win">🪟 Windows 10+</span>
+            <span class="badge ver">v2.0.0</span>
+        </div>
+    </div>
+</header>
+
+<!-- ═══════════════════════ NAV ═══════════════════════ -->
+<nav>
+    <div class="container">
+        <a href="#overview">Overview</a>
+        <a href="#install">Installation</a>
+        <a href="#ui-tour">UI Tour</a>
+        <a href="#features">Features</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#settings">Settings</a>
+        <a href="#scheduling">Scheduling</a>
+        <a href="#themes">Themes</a>
+        <a href="#shortcuts">Shortcuts</a>
+        <a href="#advanced">Advanced</a>
+        <a href="#faq">FAQ</a>
+    </div>
+</nav>
+
+<!-- ═══════════════════════ OVERVIEW ═══════════════════════ -->
+<section id="overview">
+    <div class="container">
+        <h2><span class="num">1</span> Overview</h2>
+        <p class="section-desc">
+            Website File Downloader scans any website URL and discovers downloadable files — documents, images, videos, and archives. 
+            It then lets you selectively batch-download them with concurrent connections, duplicate detection, speed limiting, and more.
+        </p>
+
+        <div class="screenshot-wrap">
+            <img src="screenshots/01_main_window.png" alt="Main application window — dark theme">
+            <div class="screenshot-caption">Main window with dark theme — URL input, file type options, crawl settings, download queue, and log pane</div>
+        </div>
+
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="icon">🔍</div>
+                <h4>Smart Website Scanning</h4>
+                <p>Scans pages via HTTP or a full Playwright browser engine (for JavaScript-rendered sites). Discovers links to files across paginated and nested pages.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">⬇️</div>
+                <h4>Batch Downloading</h4>
+                <p>Download hundreds of files concurrently with configurable parallelism (1–32 threads), request delays, and bandwidth throttling.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🔒</div>
+                <h4>SHA-256 Deduplication</h4>
+                <p>Content-based duplicate detection using SHA-256 hashes. Skips files you've already downloaded — even if filenames differ.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">📄</div>
+                <h4>File Type Filtering</h4>
+                <p>Toggle documents (PDF, DOC, XLS), images (JPG, PNG, SVG), videos (MP4, AVI), archives (ZIP, RAR, 7Z) independently. Plus regex URL filter.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">⏸️</div>
+                <h4>Pause &amp; Resume</h4>
+                <p>Pause all active downloads and resume them later without losing progress. Cancel individual or all downloads at any time.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🕐</div>
+                <h4>Download Scheduling</h4>
+                <p>Schedule automatic downloads for specific days and times. The app will scan and download on the configured schedule.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">📊</div>
+                <h4>Live Progress Tracking</h4>
+                <p>Real-time speed (KB/s), ETA estimates, per-file progress bars, and aggregate statistics (completed, failed, skipped).</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🌗</div>
+                <h4>Dark &amp; Light Themes</h4>
+                <p>Toggle between dark and light themes with <kbd>Ctrl</kbd>+<kbd>T</kbd>. Your preference persists across sessions.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">☁️</div>
+                <h4>Google Drive Support</h4>
+                <p>Download entire Google Drive folders recursively using service-account credentials or gdown fallback.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════ INSTALLATION ═══════════════════════ -->
+<section id="install">
+    <div class="container">
+        <h2><span class="num">2</span> Installation</h2>
+        <p class="section-desc">
+            The app ships as a self-contained MSI installer — no .NET runtime or other prerequisites required.
+        </p>
+
+        <h3>System Requirements</h3>
+        <table>
+            <tr><th>Requirement</th><th>Details</th></tr>
+            <tr><td>Operating System</td><td>Windows 10 version 1903 or later (x64)</td></tr>
+            <tr><td>Disk Space</td><td>~700 MB (self-contained .NET runtime included)</td></tr>
+            <tr><td>RAM</td><td>512 MB minimum, 2 GB+ recommended for large scans</td></tr>
+            <tr><td>Prerequisites</td><td>None — everything is bundled in the installer</td></tr>
+        </table>
+
+        <h3>Install Steps</h3>
+        <ol class="steps">
+            <li>
+                <strong>Download the MSI</strong>
+                <p>Get <code>WebsiteFileDownloader-2.0.0-win-x64.msi</code> from the <a href="https://github.com/AresX0/WebsiteFileDownloader/releases/tag/v2.0.0" style="color: var(--primary);">GitHub Releases</a> page.</p>
+            </li>
+            <li>
+                <strong>Run the Installer</strong>
+                <p>Double-click the MSI. The installer places the application in your user profile (no admin required) and creates Start Menu and Desktop shortcuts.</p>
+            </li>
+            <li>
+                <strong>Launch</strong>
+                <p>Open <strong>Website File Downloader</strong> from the Start Menu or Desktop shortcut. On first launch, the app auto-detects your OS theme.</p>
+            </li>
+        </ol>
+
+        <div class="callout tip">
+            <strong>💡 Tip: Playwright Browsers</strong>
+            If you enable "Use Browser (Playwright)" for scanning JavaScript-rendered sites, the app automatically installs Chromium on first use. If Chromium is already installed at <code>%LOCALAPPDATA%\ms-playwright\chromium-*</code>, it will be detected and reused instantly.
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════ UI TOUR ═══════════════════════ -->
+<section id="ui-tour">
+    <div class="container">
+        <h2><span class="num">3</span> User Interface Tour</h2>
+        <p class="section-desc">
+            The main window is organized into clearly defined regions. Here's what each area does:
+        </p>
+
+        <div class="screenshot-wrap">
+            <img src="screenshots/01_main_window.png" alt="Annotated main window">
+            <div class="screenshot-caption">Main window layout — all controls are visible without scrolling</div>
+        </div>
+
+        <h3>A. Menu Bar</h3>
+        <p>Three menus at the top:</p>
+        <table>
+            <tr><th>Menu</th><th>Items</th></tr>
+            <tr><td><strong>File</strong></td><td>Settings, Schedule Downloads, Open Output/Log Folder, Exit</td></tr>
+            <tr><td><strong>View</strong></td><td>Toggle Theme, View Skipped Files, Export File Tree (JSON)</td></tr>
+            <tr><td><strong>Help</strong></td><td>About, Check for Updates, Report Issue</td></tr>
+        </table>
+
+        <h3>B. Title &amp; Profile Selector</h3>
+        <p>The top row displays the app title and a <strong>Profile</strong> dropdown. Selecting a profile auto-fills the URL, file-type checkboxes, crawl depth, and other options for a known site type. Built-in profiles include common configurations for document archives, image galleries, and more.</p>
+
+        <h3>C. URL Input Bar</h3>
+        <p>Enter any website URL and use the action buttons:</p>
+        <table>
+            <tr><th>Button</th><th>Action</th></tr>
+            <tr><td><strong>+ Add to Queue</strong></td><td>Adds the URL to the queue (batch multiple sites)</td></tr>
+            <tr><td><strong>🔍 Scan Website</strong></td><td>Scans the URL and discovers all downloadable files</td></tr>
+            <tr><td><strong>Test Link</strong></td><td>Sends a HEAD request to verify the URL is reachable</td></tr>
+        </table>
+
+        <div class="callout info">
+            <strong>ℹ️ URL Queue</strong>
+            Click the <strong>URL Queue</strong> expander below the URL bar to manage queued URLs. You can reorder (▲▼), remove (✕), or clear (🗑) items. Drag-and-drop a <code>.txt</code> file containing URLs directly onto the window.
+        </div>
+
+        <h3>D. Download Options Panel</h3>
+        <p>Three columns of configuration:</p>
+        <table>
+            <tr><th>Column</th><th>Options</th></tr>
+            <tr>
+                <td><strong>File Types</strong></td>
+                <td>
+                    ☑ Documents (PDF, DOC, XLS, PPT, TXT, CSV, RTF)<br>
+                    ☑ Images (JPG, PNG, GIF, SVG, WEBP, BMP, TIFF)<br>
+                    ☑ Videos (MP4, AVI, MKV, MOV, WMV, FLV)<br>
+                    ☑ Archives (ZIP, RAR, 7Z, TAR, GZ)
+                </td>
+            </tr>
+            <tr>
+                <td><strong>Crawl Settings</strong></td>
+                <td>
+                    Follow Pagination (with max pages), Recursive Crawl Sub-links (with max depth)
+                </td>
+            </tr>
+            <tr>
+                <td><strong>Advanced</strong></td>
+                <td>
+                    Use Browser (Playwright), Headless Browser toggle, Concurrent downloads (1–32), Request delay (ms), Skip Duplicates (SHA-256)
+                </td>
+            </tr>
+        </table>
+
+        <h3>E. URL Filter &amp; Output Directory</h3>
+        <p>An optional <strong>regex filter</strong> to narrow file URLs (e.g., <code>\.pdf$</code> for PDFs only), plus the <strong>output directory</strong> picker.</p>
+
+        <h3>F. Action Buttons</h3>
+        <table>
+            <tr><th>Button</th><th>Purpose</th></tr>
+            <tr><td>⬇ Download Selected</td><td>Start downloading all checked files</td></tr>
+            <tr><td>⏸ Pause / ▶ Resume</td><td>Pause and resume active downloads</td></tr>
+            <tr><td>⏹ Cancel</td><td>Cancel all active downloads</td></tr>
+            <tr><td>☑ Select All / ☐ Select None</td><td>Toggle selection for all items</td></tr>
+            <tr><td>🗑 Clear</td><td>Remove all items from the queue</td></tr>
+        </table>
+
+        <h3>G. Summary Bar</h3>
+        <p>Shows at a glance: total items found, completed count, failed count, skipped (duplicate) count, real-time download speed, and estimated time remaining.</p>
+
+        <h3>H. Download Queue (DataGrid)</h3>
+        <p>A sortable, resizable grid with columns for: checkbox, file type, filename, URL, page number, status, and progress bar. Status cells are color-coded:</p>
+        <table>
+            <tr><th>Status</th><th>Color</th></tr>
+            <tr><td>Completed</td><td style="color:#4CAF50;">Green</td></tr>
+            <tr><td>Downloading</td><td style="color:#2196F3;">Blue</td></tr>
+            <tr><td>Paused</td><td style="color:#FFA726;">Orange</td></tr>
+            <tr><td>Skipped (duplicate)</td><td style="color:#FFA726;">Orange</td></tr>
+            <tr><td>Failed</td><td style="color:#F44336;">Red</td></tr>
+        </table>
+        <p>Right-click any row for <strong>Copy URL</strong>, <strong>Open in Browser</strong>, or <strong>Retry Download</strong>.</p>
+
+        <h3>I. Log Pane</h3>
+        <p>An always-visible, resizable log at the bottom shows timestamped messages: scan progress, download status, errors, and browser installation progress. Use the <strong>Clear</strong> button to reset it. The pane auto-scrolls to the latest entry.</p>
+
+        <h3>J. Status Bar</h3>
+        <p>The bottom bar contains the current status message and an overall progress bar with percentage.</p>
+    </div>
+</section>
+
+<!-- ═══════════════════════ FEATURES ═══════════════════════ -->
+<section id="features">
+    <div class="container">
+        <h2><span class="num">4</span> Feature Details</h2>
+        <p class="section-desc">
+            A deep dive into the major capabilities of the application.
+        </p>
+
+        <h3>4.1 Website Scanning</h3>
+        <p>The scanner discovers downloadable file links on any web page. It supports two scanning modes:</p>
+        <table>
+            <tr><th>Mode</th><th>When to Use</th><th>How It Works</th></tr>
+            <tr>
+                <td><strong>HTTP (default)</strong></td>
+                <td>Static HTML pages, file directories</td>
+                <td>Uses HtmlAgilityPack to parse <code>&lt;a href&gt;</code> tags from the page source. Fast and lightweight.</td>
+            </tr>
+            <tr>
+                <td><strong>Browser (Playwright)</strong></td>
+                <td>JavaScript-rendered pages, SPAs, CAPTCHA-protected sites</td>
+                <td>Launches a real Chromium browser (headless or visible) to render the page fully before extracting links.</td>
+            </tr>
+        </table>
+
+        <h3>4.2 Pagination &amp; Recursive Crawl</h3>
+        <p>When <strong>Follow Pagination</strong> is enabled, the scanner detects <code>?page=N</code>, <code>?p=N</code>, <code>/page/N</code>, and similar patterns to crawl through all result pages automatically (up to the configured max).</p>
+        <p>When <strong>Recursive Crawl Sub-links</strong> is enabled, discovered HTML links are followed to a configurable depth, scanning each sub-page for additional files.</p>
+
+        <h3>4.3 SHA-256 Deduplication</h3>
+        <p>The <strong>Hash Database</strong> maintains SHA-256 hashes of every downloaded file. Before downloading a new file:</p>
+        <ol class="steps">
+            <li><strong>Pre-scan phase:</strong> On starting a download batch, the app hashes all existing files in the output directory and loads them into the hash database.</li>
+            <li><strong>Download phase:</strong> After downloading each file, its SHA-256 hash is computed and checked against the database. If a match is found, the file is marked "Skipped (duplicate)" and removed.</li>
+            <li><strong>Persistence:</strong> The hash database persists between sessions, so files from previous runs are remembered.</li>
+        </ol>
+
+        <h3>4.4 Concurrent Downloads</h3>
+        <p>Files are downloaded in parallel using a configurable semaphore (1–32 concurrent threads). Each download has its own progress bar in the DataGrid. A global <strong>request delay</strong> (in ms) can be set to avoid overwhelming the target server.</p>
+
+        <h3>4.5 Pause, Resume &amp; Cancel</h3>
+        <p><strong>Pause</strong> suspends all active download threads. <strong>Resume</strong> picks them back up. <strong>Cancel</strong> sends a cancellation token to abort all in-flight downloads cleanly.</p>
+
+        <h3>4.6 Speed Tracking &amp; ETA</h3>
+        <p>A sliding-window speed tracker calculates real-time download speed (KB/s or MB/s). Combined with remaining file count, an estimated time remaining (ETA) is displayed in the summary bar.</p>
+
+        <h3>4.7 Bandwidth Throttling &amp; Proxy</h3>
+        <p>Set a <strong>speed limit</strong> (KB/s, 0 = unlimited) in Settings to cap bandwidth usage. An HTTP proxy (with optional authentication) can be configured for all requests.</p>
+
+        <h3>4.8 Google Drive Support</h3>
+        <p>Enter a Google Drive folder URL and the app will recursively enumerate and download all files. Supports service-account JSON credentials and a gdown fallback for public folders.</p>
+
+        <h3>4.9 Download History</h3>
+        <p>Switch to the <strong>Download History</strong> tab to see a log of all downloaded files in the current session. Columns include URL, filename, size, hash, duration, and status. Use the search box to filter by any field. History can be cleared at any time.</p>
+
+        <h3>4.10 File Tree Export</h3>
+        <p>From the <strong>View</strong> menu, select <strong>Export File Tree (JSON)</strong> to save a JSON snapshot of the entire output directory structure — useful for archiving or auditing.</p>
+
+        <h3>4.11 Single Instance Lock</h3>
+        <p>Only one instance of the application can run at a time. If you try to launch a second instance, it will exit silently.</p>
+    </div>
+</section>
+
+<!-- ═══════════════════════ WORKFLOW ═══════════════════════ -->
+<section id="workflow">
+    <div class="container">
+        <h2><span class="num">5</span> Typical Workflow</h2>
+        <p class="section-desc">
+            Here's the standard flow for downloading files from a website.
+        </p>
+
+        <ol class="steps">
+            <li>
+                <strong>Enter a URL</strong>
+                <p>Paste a website URL into the URL bar. Optionally select a profile from the dropdown to auto-configure settings.</p>
+            </li>
+            <li>
+                <strong>Configure Options</strong>
+                <p>Choose which file types to download, whether to follow pagination, enable recursive crawling, and set concurrency. For JavaScript-heavy sites, enable "Use Browser (Playwright)".</p>
+            </li>
+            <li>
+                <strong>Scan the Website</strong>
+                <p>Click <strong>🔍 Scan Website</strong>. The log pane shows progress as pages are scanned. Discovered files appear in the DataGrid.</p>
+            </li>
+            <li>
+                <strong>Review &amp; Select Files</strong>
+                <p>Review the list of discovered files. Use <strong>Select All</strong> or manually check/uncheck individual files. Sort by clicking column headers.</p>
+            </li>
+            <li>
+                <strong>Choose Output Directory</strong>
+                <p>Click <strong>📁 Browse</strong> to pick where files should be saved. The path is remembered for next time.</p>
+            </li>
+            <li>
+                <strong>Download</strong>
+                <p>Click <strong>⬇ Download Selected</strong>. Watch progress in the DataGrid and summary bar. Use Pause/Resume as needed.</p>
+            </li>
+            <li>
+                <strong>Review Results</strong>
+                <p>Check the summary bar for completed/failed/skipped counts. Switch to the <strong>Download History</strong> tab for detailed records. Failed items can be retried via right-click.</p>
+            </li>
+        </ol>
+
+        <div class="callout tip">
+            <strong>💡 Tip: Batch Multiple Sites</strong>
+            Use <strong>+ Add to Queue</strong> to queue multiple URLs, then process them one by one. You can also drag-and-drop a text file containing one URL per line.
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════ SETTINGS ═══════════════════════ -->
+<section id="settings">
+    <div class="container">
+        <h2><span class="num">6</span> Settings</h2>
+        <p class="section-desc">
+            Open Settings from the <strong>File</strong> menu or press <kbd>Ctrl</kbd>+<kbd>,</kbd>. Settings are organized into four tabs.
+        </p>
+
+        <div class="screenshot-wrap">
+            <img src="screenshots/02_settings.png" alt="Settings dialog">
+            <div class="screenshot-caption">Settings dialog with four tabs: General, Network, Appearance, and Advanced</div>
+        </div>
+
+        <h3>General Tab</h3>
+        <table>
+            <tr><th>Setting</th><th>Description</th></tr>
+            <tr><td>Download Folder</td><td>Default output directory for all downloads</td></tr>
+            <tr><td>Log Folder</td><td>Where log files (<code>website_downloader.log</code> and <code>error.log</code>) are written</td></tr>
+            <tr><td>Concurrent Downloads</td><td>Number of simultaneous download threads (1–32)</td></tr>
+            <tr><td>Auto-start on launch</td><td>Automatically begin downloading queued URLs when the app opens</td></tr>
+            <tr><td>Start minimized</td><td>Launch the app minimized to the taskbar</td></tr>
+            <tr><td>Mirror URL directory structure</td><td>Create subdirectories matching the website's URL path</td></tr>
+        </table>
+
+        <h3>Network Tab</h3>
+        <table>
+            <tr><th>Setting</th><th>Description</th></tr>
+            <tr><td>HTTP Proxy</td><td>Proxy URL in format <code>http://user:pass@host:port</code></td></tr>
+            <tr><td>Speed Limit (KB/s)</td><td>Bandwidth cap; set to 0 for unlimited</td></tr>
+            <tr><td>Request Delay (ms)</td><td>Delay between sequential HTTP requests to avoid rate limiting</td></tr>
+        </table>
+
+        <h3>Appearance Tab</h3>
+        <p>Switch between <strong>Dark</strong> and <strong>Light</strong> themes. The choice is saved and applied on next launch.</p>
+
+        <h3>Advanced Tab</h3>
+        <table>
+            <tr><th>Setting</th><th>Description</th></tr>
+            <tr><td>Google Drive Credentials</td><td>Path to a Google service-account JSON file for Drive API access</td></tr>
+            <tr><td>gdown Fallback</td><td>Uses the gdown tool as a fallback for public Google Drive folders</td></tr>
+            <tr><td>Skip Duplicates (SHA-256)</td><td>Enable content-based duplicate detection across sessions</td></tr>
+            <tr><td>Export / Import Settings</td><td>Save your configuration to a file, or load one from another machine</td></tr>
+            <tr><td>Restore Defaults</td><td>Reset all settings to factory defaults</td></tr>
+        </table>
+    </div>
+</section>
+
+<!-- ═══════════════════════ SCHEDULING ═══════════════════════ -->
+<section id="scheduling">
+    <div class="container">
+        <h2><span class="num">7</span> Download Scheduling</h2>
+        <p class="section-desc">
+            Schedule the app to automatically scan and download at specified times.
+        </p>
+
+        <div class="screenshot-wrap">
+            <img src="screenshots/03_schedule.png" alt="Schedule dialog">
+            <div class="screenshot-caption">Schedule Downloads dialog — select days of the week and a time</div>
+        </div>
+
+        <p>Open from <strong>File → Schedule Downloads</strong>. Select one or more days of the week, set the time (24-hour format), and click <strong>Set Schedule</strong>.</p>
+
+        <p>When the schedule triggers:</p>
+        <ol>
+            <li>The app takes the first URL from the queue (or the current URL field).</li>
+            <li>Performs a full scan using the current options.</li>
+            <li>Automatically starts downloading all discovered files.</li>
+        </ol>
+
+        <div class="callout warn">
+            <strong>⚠️ Note</strong>
+            The app must be running for the schedule to trigger. It uses an in-process timer, not Windows Task Scheduler. Leave the app open (it can be minimized) for scheduled downloads to work.
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════ THEMES ═══════════════════════ -->
+<section id="themes">
+    <div class="container">
+        <h2><span class="num">8</span> Themes</h2>
+        <p class="section-desc">
+            Switch between dark and light themes. The app detects your OS theme on first launch and remembers your preference.
+        </p>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 24px;">
+            <div class="screenshot-wrap" style="margin: 0;">
+                <img src="screenshots/01_main_window.png" alt="Dark theme">
+                <div class="screenshot-caption">Dark Theme (default)</div>
+            </div>
+            <div class="screenshot-wrap" style="margin: 0;">
+                <img src="screenshots/04_light_theme.png" alt="Light theme">
+                <div class="screenshot-caption">Light Theme</div>
+            </div>
+        </div>
+
+        <p style="margin-top: 20px;">Toggle the theme at any time with:</p>
+        <ul style="margin: 8px 0 0 24px; color: var(--text-secondary);">
+            <li>Keyboard shortcut: <kbd>Ctrl</kbd>+<kbd>T</kbd></li>
+            <li>Menu: <strong>View → Toggle Theme</strong></li>
+            <li>Settings: <strong>Appearance</strong> tab</li>
+        </ul>
+    </div>
+</section>
+
+<!-- ═══════════════════════ KEYBOARD SHORTCUTS ═══════════════════════ -->
+<section id="shortcuts">
+    <div class="container">
+        <h2><span class="num">9</span> Keyboard Shortcuts</h2>
+        <p class="section-desc">
+            Quick keyboard shortcuts for common operations.
+        </p>
+
+        <table>
+            <tr><th>Shortcut</th><th>Action</th></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>T</kbd></td><td>Toggle dark/light theme</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>,</kbd></td><td>Open Settings</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd></td><td>Select all files</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd></td><td>Deselect all files</td></tr>
+            <tr><td><kbd>F5</kbd></td><td>Start scan / refresh</td></tr>
+            <tr><td><kbd>Escape</kbd></td><td>Cancel current operation</td></tr>
+            <tr><td><kbd>Alt</kbd>+<kbd>F4</kbd></td><td>Exit the application</td></tr>
+        </table>
+    </div>
+</section>
+
+<!-- ═══════════════════════ ADVANCED ═══════════════════════ -->
+<section id="advanced">
+    <div class="container">
+        <h2><span class="num">10</span> Advanced Topics</h2>
+        <p class="section-desc">
+            Details on data storage, logging, and technical internals.
+        </p>
+
+        <h3>10.1 Configuration File</h3>
+        <p>Settings are stored as JSON at:</p>
+        <pre>%LOCALAPPDATA%\WebsiteDownloader\config.json</pre>
+        <p>You can manually edit this file, or use the Export/Import buttons in Settings to transfer configurations between machines.</p>
+
+        <h3>10.2 Logging</h3>
+        <p>Two log files are maintained in the configured log directory (defaults to <code>%LOCALAPPDATA%\WebsiteDownloader\logs\</code>):</p>
+        <table>
+            <tr><th>File</th><th>Contents</th></tr>
+            <tr><td><code>website_downloader.log</code></td><td>All activity: scans, downloads, completions, configuration changes</td></tr>
+            <tr><td><code>error.log</code></td><td>Errors only: failed downloads, exceptions, connectivity issues</td></tr>
+        </table>
+
+        <h3>10.3 Hash Database</h3>
+        <p>The SHA-256 hash database is stored alongside the config at <code>%LOCALAPPDATA%\WebsiteDownloader\hashes.db</code>. It's a simple text file of <code>hash|filepath</code> pairs. Deleting it resets duplicate detection.</p>
+
+        <h3>10.4 Queue State</h3>
+        <p>The URL queue persists to <code>%LOCALAPPDATA%\WebsiteDownloader\queue_state.json</code> so queued URLs survive app restarts.</p>
+
+        <h3>10.5 Playwright Browser Cache</h3>
+        <p>When using browser-based scanning, Chromium is installed at:</p>
+        <pre>%LOCALAPPDATA%\ms-playwright\chromium-*\</pre>
+        <p>This takes about 500 MB. The app checks for existing installations and skips redundant downloads. If you need to force a reinstall, delete the folder above.</p>
+
+        <h3>10.6 Mirror Directory Structure</h3>
+        <p>When enabled in Settings, downloaded files are organized into subdirectories matching the website's URL path. For example, a file at <code>https://example.com/docs/2024/report.pdf</code> is saved to <code>docs\2024\report.pdf</code> within your output folder.</p>
+
+        <h3>10.7 Architecture</h3>
+        <p>The application is built with a clean separation of concerns:</p>
+        <table>
+            <tr><th>Layer</th><th>Project</th><th>Role</th></tr>
+            <tr><td>Core</td><td><code>WebsiteDownloader.Core</code></td><td>Models, services (scanning, downloading, hashing, scheduling, logging). No UI dependencies.</td></tr>
+            <tr><td>UI</td><td><code>WebsiteDownloader.UI</code></td><td>WPF XAML views, MVVM ViewModels (BindableBase, RelayCommand, AsyncRelayCommand), converters, theme resources.</td></tr>
+        </table>
+    </div>
+</section>
+
+<!-- ═══════════════════════ FAQ ═══════════════════════ -->
+<section id="faq">
+    <div class="container">
+        <h2><span class="num">11</span> FAQ</h2>
+        <p class="section-desc">Frequently asked questions.</p>
+
+        <details>
+            <summary>The scan doesn't find any files. What's wrong?</summary>
+            <div class="answer">
+                <p>This usually means the site uses JavaScript to render file links. Enable <strong>"Use Browser (Playwright)"</strong> in the Advanced options. This launches a real Chromium browser that can render JavaScript-heavy pages.</p>
+                <p>Also check that the correct file type checkboxes are enabled (Documents, Images, etc.).</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>How do I download from a site with multiple pages of results?</summary>
+            <div class="answer">
+                <p>Enable <strong>"Follow Pagination"</strong> in the Crawl Settings. The scanner automatically detects page links (<code>?page=2</code>, <code>/page/3</code>, etc.) and follows them up to the configured maximum number of pages.</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>Can I limit download speed to avoid hogging my bandwidth?</summary>
+            <div class="answer">
+                <p>Yes. Go to <strong>Settings → Network</strong> and set a <strong>Speed Limit</strong> in KB/s. Set to 0 for unlimited.</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>The app says "Skipped (duplicate)". How does that work?</summary>
+            <div class="answer">
+                <p>The app computes a SHA-256 hash of every downloaded file and stores it in a persistent database. If a file with the same hash already exists (even under a different name), it's skipped. Disable this via the "Skip Duplicates" checkbox or in <strong>Settings → Advanced</strong>.</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>Where does the app store its configuration and data?</summary>
+            <div class="answer">
+                <p>Everything lives under <code>%LOCALAPPDATA%\WebsiteDownloader\</code>:</p>
+                <ul style="margin: 8px 0 0 20px;">
+                    <li><code>config.json</code> — Settings</li>
+                    <li><code>hashes.db</code> — SHA-256 hash database</li>
+                    <li><code>queue_state.json</code> — Saved URL queue</li>
+                    <li><code>logs\</code> — Log files</li>
+                </ul>
+            </div>
+        </details>
+
+        <details>
+            <summary>Can I use a proxy server?</summary>
+            <div class="answer">
+                <p>Yes. Enter your proxy URL in <strong>Settings → Network → HTTP Proxy</strong> (format: <code>http://user:pass@host:port</code>). Both scanning and downloading will use the proxy.</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>How do I download an entire Google Drive folder?</summary>
+            <div class="answer">
+                <p>Paste the Google Drive folder URL into the URL bar. For private folders, configure a service-account JSON file in <strong>Settings → Advanced</strong>. For public folders, the gdown fallback option works without credentials.</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>Can I only download PDFs (or any specific type)?</summary>
+            <div class="answer">
+                <p>Two ways: (1) Uncheck all file types except Documents, or (2) Use the <strong>URL Filter</strong> regex field with a pattern like <code>\.pdf$</code> to match only PDF links.</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>What happens if a download fails?</summary>
+            <div class="answer">
+                <p>The app retries each download up to 3 times automatically. If it still fails, the item is marked red ("Failed") with an error message. Right-click the item and select <strong>Retry Download</strong> to try again manually.</p>
+            </div>
+        </details>
+
+        <details>
+            <summary>How do I uninstall?</summary>
+            <div class="answer">
+                <p>Go to <strong>Windows Settings → Apps → Installed Apps</strong>, find "Website File Downloader", and click Uninstall. To also remove stored data, delete <code>%LOCALAPPDATA%\WebsiteDownloader\</code>.</p>
+            </div>
+        </details>
+    </div>
+</section>
+
+<!-- ═══════════════════════ FOOTER ═══════════════════════ -->
+<footer>
+    <div class="container">
+        <p>Website File Downloader v2.0.0 &nbsp;·&nbsp; Built with .NET 10 &amp; WPF &nbsp;·&nbsp;
+           <a href="https://github.com/AresX0/WebsiteFileDownloader">GitHub Repository</a> &nbsp;·&nbsp;
+           <a href="https://github.com/AresX0/WebsiteFileDownloader/releases">Releases</a>
+        </p>
+        <p style="margin-top: 8px;">© 2026 Website File Downloader Contributors</p>
+    </div>
+</footer>
+
+</body>
+</html>
